@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, FolderKanban, Bot, TerminalSquare, BrainCircuit, BringToFront, Link2, FileCog, Settings, Orbit } from 'lucide-react';
+import { LayoutDashboard, FolderKanban, Bot, TerminalSquare, BrainCircuit, BringToFront, Link2, FileCog, Settings, Orbit, Workflow } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 const navItems = [
@@ -7,6 +7,7 @@ const navItems = [
   { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
   { name: 'Projects', path: '/projects', icon: FolderKanban },
   { name: 'Agents', path: '/agents', icon: Bot },
+  { name: 'Relay', path: '/relay', icon: Workflow },
   { name: 'Memory', path: '/memory', icon: BrainCircuit },
   { name: 'Handoffs', path: '/handoffs', icon: BringToFront },
   { name: 'MCP Connectors', path: '/connectors', icon: Link2 },
