@@ -14,6 +14,7 @@ import { Handoffs } from './pages/Handoffs';
 import { Connectors } from './pages/Connectors';
 import { ToolLogs } from './pages/ToolLogs';
 import { Settings } from './pages/Settings';
+import { Relay } from './pages/Relay';
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="connectors" element={<Connectors />} />
           <Route path="logs" element={<ToolLogs />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="relay" element={<Relay />} />
         </Route>
       </Routes>
     </BrowserRouter>
