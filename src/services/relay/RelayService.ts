@@ -8,7 +8,8 @@
  * Every outbound action requires explicit admin approval first.
  */
 
-import { defaultAdapter, type PersistenceAdapter } from '../persistence/PersistenceService';
+import { defaultAdapter } from '../persistence/PersistenceService';
+import type { PersistenceAdapter } from '../../types/persistence';
 import type {
   RelayPacket,
   RelayResponse,
