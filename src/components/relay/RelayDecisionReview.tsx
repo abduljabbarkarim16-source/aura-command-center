@@ -6,6 +6,8 @@ import {
   Route,
   GitBranch,
   ShieldCheck,
+  Loader2,
+  BrainCircuit,
 } from 'lucide-react';
 import type { RelayExchange, RelayTargetType } from '../../types/relay';
 
@@ -21,7 +23,7 @@ const TARGET_OPTIONS: { value: RelayTargetType; label: string }[] = [
 interface Props {
   exchange: RelayExchange;
   onApproveRoute: (target: RelayTargetType) => void;
-  onCreateHandoff: () => void;
+  onCreateHandoff: () => Promise<void>;
 }
 
 export function RelayDecisionReview({ exchange, onApproveRoute, onCreateHandoff }: Props) {
@@ -29,11 +31,23 @@ export function RelayDecisionReview({ exchange, onApproveRoute, onCreateHandoff 
   const [selectedTarget, setSelectedTarget] = useState<RelayTargetType>(
     resp?.recommendedTarget ?? 'manual'
   );
+  const [busy, setBusy] = useState(false);
 
   if (!resp) return null;
 
   const isRouteApproved = exchange.packet.status === 'approved_to_route';
   const isRoutedToAgent = exchange.packet.status === 'routed_to_agent';
+  const handoffCreated = Boolean(exchange.createdHandoffId);
+  const memoryCreated = Boolean(exchange.createdMemoryEntryId);
+
+  async function handleCreateHandoff() {
+    setBusy(true);
+    try {
+      await onCreateHandoff();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -159,21 +173,50 @@ export function RelayDecisionReview({ exchange, onApproveRoute, onCreateHandoff 
                 Route approved → <strong>{selectedTarget}</strong>
               </div>
               <button
-                onClick={onCreateHandoff}
-                className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md text-sm font-semibold transition"
+                onClick={handleCreateHandoff}
+                disabled={busy}
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-md text-sm font-semibold transition"
               >
-                <GitBranch className="w-4 h-4" />
-                Create Handoff (Phase 2D placeholder)
+                {busy ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Creating handoff…
+                  </>
+                ) : (
+                  <>
+                    <GitBranch className="w-4 h-4" />
+                    Create Handoff &amp; Log Memory
+                  </>
+                )}
               </button>
             </div>
           )}
         </div>
       )}
 
+      {/* Completion state */}
       {isRoutedToAgent && (
-        <div className="flex items-center gap-2 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-300 text-sm">
-          <CheckCircle2 className="w-4 h-4 shrink-0" />
-          Exchange complete — routed to <strong className="ml-1">{selectedTarget}</strong>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-300 text-sm">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            Exchange complete — routed to <strong className="ml-1">{selectedTarget}</strong>
+          </div>
+          {(handoffCreated || memoryCreated) && (
+            <div className="flex items-center gap-2 flex-wrap">
+              {handoffCreated && (
+                <span className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-300">
+                  <GitBranch className="w-3 h-3" />
+                  Handoff created · {exchange.createdHandoffId}
+                </span>
+              )}
+              {memoryCreated && (
+                <span className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-violet-500/10 border border-violet-500/20 text-violet-300">
+                  <BrainCircuit className="w-3 h-3" />
+                  Memory logged · {exchange.createdMemoryEntryId}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -132,4 +132,9 @@ export interface RelayExchange {
   response?: RelayResponse;
   createdAt: string;
   completedAt?: string;
+  createdHandoffId?: string;
+  createdMemoryEntryId?: string;
+  routedAt?: string;
+  finalTargetAgentId?: string;
+  finalTargetType?: RelayTargetType;
 }
