@@ -1,0 +1,6 @@
+{
+  "name": "Agent Command Center",
+  "description": "A production-ready MVP desktop application to control and orchestrate multiple AI agents.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
