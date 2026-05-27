@@ -9,7 +9,10 @@
  */
 
 import { defaultAdapter } from '../persistence/PersistenceService';
+import { handoffService } from '../handoff/HandoffService';
+import { settingsService } from '../settings/SettingsService';
 import type { PersistenceAdapter } from '../../types/persistence';
+import type { PersistedMemoryEntry } from '../../types/persistence';
 import type {
   RelayPacket,
   RelayResponse,
@@ -322,13 +325,61 @@ export class RelayService {
   }
 
   async createHandoffFromRelay(exchangeId: string): Promise<RelayExchange | null> {
-    // Phase 2C placeholder — actual handoff creation in a later phase
-    return this.updateRelayStatus(
-      exchangeId,
-      'routed_to_agent',
-      'admin',
-      'Handoff creation: Phase 2D placeholder triggered'
+    const all = await this.listRelayHistory();
+    const exchange = all.find(e => e.id === exchangeId);
+    if (!exchange) return null;
+
+    // ── 1. Create the persisted handoff ──────────────────────────────────────
+    const handoff = await handoffService.createHandoffFromRelay(exchange);
+
+    // ── 2. Create a memory entry ──────────────────────────────────────────────
+    const resp = exchange.response;
+    const packet = exchange.packet;
+    const memEntry: PersistedMemoryEntry = {
+      id: `mem-relay-${uid()}`,
+      timestamp: now(),
+      projectId: 'relay',          // placeholder — no project wiring yet in Phase 2D
+      agentName: packet.sourceAgentId || packet.sourceType,
+      category: 'handoff',
+      title: `Relay: ${packet.title}`,
+      summary: resp?.parsedSummary ?? packet.objective,
+      details: [
+        `Source: ${packet.sourceType} → Target: ${resp?.recommendedTarget ?? packet.targetType}`,
+        resp?.risks?.length
+          ? `Risks: ${resp.risks.join('; ')}`
+          : '',
+        resp?.nextActions?.length
+          ? `Next Actions: ${resp.nextActions.join('; ')}`
+          : '',
+      ].filter(Boolean).join('\n'),
+      relatedFiles: [],
+      tags: [
+        'relay',
+        packet.packetType,
+        packet.sourceType,
+        resp?.recommendedTarget ?? 'manual',
+      ],
+      status: 'active',
+    };
+    await settingsService.addMemoryEntry(memEntry);
+
+    // ── 3. Update exchange record ─────────────────────────────────────────────
+    exchange.packet.status = 'routed_to_agent';
+    exchange.packet.updatedAt = now();
+    exchange.completedAt = now();
+    exchange.createdHandoffId = handoff.id;
+    exchange.createdMemoryEntryId = memEntry.id;
+    exchange.routedAt = now();
+    exchange.finalTargetType = handoff.targetType as RelayTargetType;
+    if (handoff.targetAgentId) {
+      exchange.finalTargetAgentId = handoff.targetAgentId;
+    }
+    exchange.packet.auditTrail.push(
+      auditEvent('aura', 'handoff_created', `Handoff ID: ${handoff.id}`),
+      auditEvent('aura', 'memory_entry_created', `Memory ID: ${memEntry.id}`)
     );
+    await this.saveAll(all);
+    return exchange;
   }
 
   async archiveExchange(exchangeId: string): Promise<void> {

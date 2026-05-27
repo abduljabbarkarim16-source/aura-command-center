@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Clock, ChevronDown, ChevronUp, History } from 'lucide-react';
+import { Clock, ChevronDown, ChevronUp, History, GitBranch, BrainCircuit, Route } from 'lucide-react';
 import type { RelayExchange, RelayStatus } from '../../types/relay';
 
 interface Props {
@@ -115,9 +115,36 @@ export function RelayHistoryPanel({ exchanges, activeId, onSelect }: Props) {
               </button>
             </div>
 
-            {/* Expanded audit trail */}
+            {/* Expanded audit trail & details */}
             {isExpanded && (
-              <div className="px-3 pb-3">
+              <div className="px-3 pb-3 space-y-4">
+                {(ex.createdHandoffId || ex.createdMemoryEntryId || ex.finalTargetType) && (
+                  <div className="pt-2 border-t border-zinc-800">
+                    <p className="text-xs font-medium text-zinc-500 mb-1.5">Outcome Details</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {ex.finalTargetType && (
+                        <span className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-zinc-800/80 border border-zinc-700 text-zinc-300">
+                          <Route className="w-3 h-3 text-zinc-400" />
+                          Routed to: {ex.finalTargetType}
+                          {ex.finalTargetAgentId && ` (${ex.finalTargetAgentId})`}
+                        </span>
+                      )}
+                      {ex.createdHandoffId && (
+                        <span className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-300">
+                          <GitBranch className="w-3 h-3" />
+                          Handoff: {ex.createdHandoffId}
+                        </span>
+                      )}
+                      {ex.createdMemoryEntryId && (
+                        <span className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-violet-500/10 border border-violet-500/20 text-violet-300">
+                          <BrainCircuit className="w-3 h-3" />
+                          Memory: {ex.createdMemoryEntryId}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+                
                 <AuditTrail exchange={ex} />
               </div>
             )}
