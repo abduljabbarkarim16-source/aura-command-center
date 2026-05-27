@@ -115,11 +115,14 @@ function StepIndicator({ current }: { current: Step }) {
 // ReasoningRelayPanel
 // ---------------------------------------------------------------------------
 
+import { RelayWorkflowCard } from './RelayWorkflowCard';
+
 export function ReasoningRelayPanel() {
   const [exchanges, setExchanges] = useState<RelayExchange[]>([]);
   const [active, setActive] = useState<RelayExchange | null>(null);
   const [step, setStep] = useState<Step>('compose');
   const [formatted, setFormatted] = useState('');
+  const [advanced, setAdvanced] = useState(false);
 
   const reload = useCallback(async () => {
     const all = await relayService.listRelayHistory();
@@ -216,69 +219,95 @@ export function ReasoningRelayPanel() {
           </div>
 
           <div className="p-5">
+            <div className="flex justify-end mb-4">
+              <button 
+                onClick={() => setAdvanced(!advanced)}
+                className="text-xs text-zinc-500 hover:text-zinc-300 transition"
+              >
+                {advanced ? 'Hide Advanced Edit' : 'Show Advanced Edit'}
+              </button>
+            </div>
+
             {/* Compose */}
             {step === 'compose' && (
               <RelayPacketComposer onGenerate={handleGenerate} />
             )}
 
-            {/* Review */}
-            {step === 'review' && active && (
-              <RelayPacketPreview
-                packet={active.packet}
-                formatted={formatted}
-                onApprove={handleApprove}
-                onReject={handleReject}
-                onMarkSent={handleMarkSent}
+            {/* Workflow Card Mode */}
+            {!advanced && step !== 'compose' && active && (
+              <RelayWorkflowCard 
+                exchange={active}
+                onApproveSend={handleApprove}
+                onImportResponse={() => setStep('import')} // For import we need the text input, so we might switch to advanced implicitly or have a simplified import in the card...
+                onApproveRoute={() => handleApproveRoute('antigravity' as RelayTargetType)}
+                onCreateHandoff={handleCreateHandoff}
               />
             )}
 
-            {/* Import */}
-            {step === 'import' && active && (
+            {/* Import override if in basic mode */}
+            {!advanced && step === 'import' && active && (
               <RelayResponseImporter
                 packet={active.packet}
                 onImport={handleImport}
               />
             )}
 
-            {/* Parse / Route */}
-            {step === 'parse' && active && (
-              <RelayDecisionReview
-                exchange={active}
-                onApproveRoute={handleApproveRoute}
-                onCreateHandoff={handleCreateHandoff}
-              />
-            )}
+            {/* Advanced Edit Mode */}
+            {advanced && step !== 'compose' && (
+              <>
+                {step === 'review' && active && (
+                  <RelayPacketPreview
+                    packet={active.packet}
+                    formatted={formatted}
+                    onApprove={handleApprove}
+                    onReject={handleReject}
+                    onMarkSent={handleMarkSent}
+                  />
+                )}
 
-            {/* Done */}
-            {step === 'done' && active && (
-              <div className="flex flex-col items-center gap-4 py-8 text-center">
-                <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                  active.packet.status === 'rejected'
-                    ? 'bg-rose-500/15'
-                    : 'bg-emerald-500/15'
-                }`}>
-                  <CheckCircle2 className={`w-6 h-6 ${
-                    active.packet.status === 'rejected' ? 'text-rose-400' : 'text-emerald-400'
-                  }`} />
-                </div>
-                <div>
-                  <p className="text-white font-semibold">
-                    {active.packet.status === 'rejected' ? 'Relay Rejected' : 'Relay Complete'}
-                  </p>
-                  <p className="text-sm text-zinc-400 mt-1">
-                    {active.packet.title}
-                  </p>
-                  <p className="text-xs text-zinc-600 mt-1 capitalize">
-                    Status: {active.packet.status.replace(/_/g, ' ')}
-                  </p>
-                </div>
-                <button
-                  onClick={startNew}
-                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md text-sm font-medium transition"
-                >
-                  <Plus className="w-4 h-4" /> Start New Relay
-                </button>
-              </div>
+                {step === 'import' && active && (
+                  <RelayResponseImporter
+                    packet={active.packet}
+                    onImport={handleImport}
+                  />
+                )}
+
+                {step === 'parse' && active && (
+                  <RelayDecisionReview
+                    exchange={active}
+                    onApproveRoute={handleApproveRoute}
+                    onCreateHandoff={handleCreateHandoff}
+                  />
+                )}
+
+                {step === 'done' && active && (
+                  <div className="flex flex-col items-center gap-4 py-8 text-center">
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                      active.packet.status === 'rejected'
+                        ? 'bg-rose-500/15'
+                        : 'bg-emerald-500/15'
+                    }`}>
+                      <CheckCircle2 className={`w-6 h-6 ${
+                        active.packet.status === 'rejected' ? 'text-rose-400' : 'text-emerald-400'
+                      }`} />
+                    </div>
+                    <div>
+                      <p className="text-white font-semibold">
+                        {active.packet.status === 'rejected' ? 'Relay Rejected' : 'Relay Complete'}
+                      </p>
+                      <p className="text-sm text-zinc-400 mt-1">
+                        {active.packet.title}
+                      </p>
+                    </div>
+                    <button
+                      onClick={startNew}
+                      className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md text-sm font-medium transition"
+                    >
+                      <Plus className="w-4 h-4" /> Start New Relay
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
