@@ -5,7 +5,8 @@ import { TopBar } from './TopBar';
 import { CommandPalette } from './operator/CommandPalette';
 
 export function Layout() {
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  // Voice Core is the default mode — start with sidebar collapsed for a clean presence-first layout
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
 
   return (
     <div className="flex h-screen bg-zinc-950 text-zinc-100 font-sans overflow-hidden selection:bg-indigo-500/30">

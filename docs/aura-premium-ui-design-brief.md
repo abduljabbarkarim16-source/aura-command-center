@@ -334,4 +334,168 @@ All future distributed capabilities are surfaced as placeholder cards with tier 
 
 ---
 
-*End of design brief — Phase 2E (including Deep Refinement pass)*
+## 14. Phase 2E Voice Core — Product Correction
+
+**Correction date:** 2026-05-28  
+**Applies to:** `phase-2e-aura-operator-ux-redesign`
+
+---
+
+### 14.1 Core Principle Change
+
+AURA is no longer **console-first**. AURA is now **voice-presence-first**.
+
+The console, dashboard, relay, projects, memory, and technical panels are background layers — summoned only when needed. The primary interface is the AURA Voice Core: a large, ambient, reactive visualizer that communicates presence, state, and intent.
+
+> *The admin talks to AURA. AURA reacts visually. Everything else surfaces on request.*
+
+---
+
+### 14.2 Presence-First Model
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  [Status chips: Memory / Relay / Tools / Agent]          │  ← ambient top strip
+│                                                          │
+│  [Thought card]   [AURA Orb — xl]   [Thought card]      │  ← main presence
+│                   [State label]                          │
+│                   [Admin indicator]                      │
+│                                                          │
+│  [Approval card — only when pending]                     │  ← surfaces on demand
+│                                                          │
+│  [🎤 Speak]  [Open Console]  [Admin Panel]  [Details]   │  ← minimal actions
+└─────────────────────────────────────────────────────────┘
+```
+
+**Default visible:**
+- AURA voice visualizer (xl, center)
+- Current AURA state label
+- Active mission chip (collapsible card)
+- Status chips: Memory / Relay / Tools / Agent
+- Thought cards (momentary, auto-dismiss)
+- Admin voice indicator
+- Safe Monitor Mode badge (when active)
+- Pending approval badge + card (when pending)
+- Three action buttons: Speak / Open Console / Open Admin Panel / Show Details
+
+**Hidden by default (opened on demand):**
+- Chat console (full message stream + composer)
+- Admin Panel overlay (project/relay/handoff/health)
+- Technical Drawer (workspace / artifacts / runtime / git)
+- OperatorRail (right panel)
+
+---
+
+### 14.3 Console Mode System
+
+```ts
+type ConsoleMode = 'voiceCore' | 'chatConsole';
+```
+
+| Mode | Default | Description |
+|------|---------|-------------|
+| `voiceCore` | ✅ yes | Large AURA orb, thought cards, approval overlay, minimal chrome |
+| `chatConsole` | no | Full message stream + AuraComposer, ← Voice Core button in nav |
+
+**"Open Console"** → switches to `chatConsole`  
+**"← Voice Core"** button in console top nav → returns to `voiceCore`  
+**Admin Panel** → `AdminPanelOverlay` slide-in (available in both modes)  
+**Technical Drawer** → `TechnicalDrawer` (available in both modes)
+
+---
+
+### 14.4 Momentary Thought Cards
+
+`AuraThoughtStack` displays a rotating set of concise status cards near the visualizer.
+
+Rules:
+- No raw logs — only human-readable summaries
+- Auto-dismiss after 3–5 seconds (TTL per card)
+- Max 2 visible at a time (mobile: below orb; desktop: flanking the orb)
+- Variants: info / mission / relay / approval / tool / memory / agent / success / warning
+
+Example thoughts:
+- *"Reviewing current mission…"* (mission variant)
+- *"Relay packet ready."* (relay)
+- *"1 approval waiting."* (approval)
+- *"No external tools running."* (tool)
+- *"Memory updated."* (memory)
+- *"Antigravity is standing by."* (agent)
+
+---
+
+### 14.5 Admin Speaking Indicator
+
+`AdminVoiceIndicator` is a small waveform strip placed below the AURA orb.
+
+States:
+| State | Visual | Color |
+|-------|--------|-------|
+| `idle` | flat bars | zinc |
+| `speaking` | animated bounce bars | sky blue |
+| `muted` | flat bars | rose |
+| `push-to-talk-ready` | flat bars + dot pulse | amber |
+
+Controlled by the same mic/mute toggle buttons on the Voice Core.  
+No real audio capture. CSS `admin-bar-bounce` keyframe, no Web Audio API.
+
+---
+
+### 14.6 Approval Overlay Model
+
+Approvals surface as prominent cards **over the Voice Core**, not buried in the operator panel.
+
+- Amber badge in status strip: *"1 Approval"* (pulses)
+- `ApprovalCard` animates in below the orb when pending
+- Three buttons: Approve (indigo) / Reject (zinc/rose) / Details (opens Technical Drawer)
+- After decision: card dims with Approved / Rejected status badge, then auto-fades
+
+The approval card uses the existing `ApprovalCard` component — no duplication.
+
+---
+
+### 14.7 Admin Panel Overlay
+
+`AdminPanelOverlay` is a slide-in right-side panel (380px) containing:
+- **Projects** — name, status badge, progress bar, agent
+- **Relay** — label, risk level, status
+- **Handoffs** — from→to route, objective, status
+- **System Health** — 4 check indicators
+- **Technical Drawer** shortcut button at the bottom
+
+Hidden by default. Opened via "Open Admin Panel" on Voice Core or Console nav.  
+Backdrop blur + click-outside to close.
+
+---
+
+### 14.8 Voice Interaction Future Model
+
+Voice Core is designed for real audio connection in a future phase:
+
+```
+Current (Phase 2E):         Future:
+─────────────────────────   ──────────────────────────────────
+Mock amplitude (0.4)     →  AnalyserNode.getByteFrequencyData()
+Speak button (placeholder)→  MediaStream + VAD
+Admin waveform (CSS)     →  Real input stream bars
+AURA bars (CSS bounce)   →  Real TTS amplitude
+```
+
+Phase 2E voice buttons are clearly labeled `(placeholder)` to signal this gap.
+
+---
+
+### 14.9 Layout Changes
+
+| Setting | Before (2E Deep Refinement) | After (Voice Core) |
+|---------|-----------------------------|--------------------|
+| Default sidebar state | Expanded (256px) | Collapsed (68px) |
+| Default right rail | Collapsed (68px) | Collapsed (68px) |
+| Default console mode | `chatConsole` | `voiceCore` |
+| First post-launch view | Dense chat stream | AURA orb + state |
+
+The sidebar and right rail remain available — collapsed by default to give Voice Core full visual dominance.
+
+---
+
+*End of design brief — Phase 2E (including Voice Core correction)*
