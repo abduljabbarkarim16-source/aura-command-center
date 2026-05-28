@@ -1,19 +1,24 @@
 /**
- * Projects page — Phase 2B
+ * Projects page — Phase 2E (Premium Redesign)
  *
- * Loads projects from the persistence service (localStorage).
- * Falls back to seed data from mockProjects on first launch so the UI
- * is never empty. The seed is written into storage once and then owned
- * by the persistence layer going forward.
+ * Shows a masonry-inspired grid of ProjectMissionCards.
+ * Data loads from persistence (Phase 2B) with a mock seed fallback.
  */
 
-import { useEffect, useState } from 'react';
-import { FolderGit2, Plus, RefreshCw } from 'lucide-react';
-import { mockProjects } from '../store/mockData';
+import React, { useEffect, useState, Fragment } from 'react';
+import { RefreshCw, Search, Plus } from 'lucide-react';
+import { mockProjects, mockAgents } from '../store/mockData';
 import { settingsService } from '../services/settings/SettingsService';
 import type { PersistedProject } from '../types/persistence';
+import {
+  ProjectMissionCard,
+  NewProjectCard,
+  type ProjectMission,
+  type ProjectStatus,
+} from '../components/operator/ProjectMissionCard';
 
-/** Converts the existing mock Project shape into PersistedProject */
+// ─── Seed conversion ──────────────────────────────────────────────────────────
+
 function seedFromMock(): PersistedProject[] {
   return mockProjects.map(p => ({
     id: p.id,
@@ -29,98 +34,167 @@ function seedFromMock(): PersistedProject[] {
   }));
 }
 
+function toMissionCard(proj: PersistedProject, index: number): ProjectMission {
+  // Find agent name from mock data
+  const mockProj = mockProjects.find(p => p.id === proj.id);
+  const agent = mockProj?.activeAgentId
+    ? mockAgents.find(a => a.id === mockProj.activeAgentId)
+    : undefined;
+
+  // Fabricate some demo mission data for display
+  const missions: Record<string, string> = {
+    'proj-1': 'Build a unified AI agent orchestration desktop app with relay, memory, and approval workflows.',
+    'proj-2': 'Implement a high-performance Rust/Actix-web e-commerce backend with PostgreSQL.',
+  };
+  const lastActions: Record<string, string> = {
+    'proj-1': 'Merged Phase 2D — relay handoff integration with persistent storage',
+    'proj-2': 'Completed product catalog API endpoints and search indexing',
+  };
+  const nextActions: Record<string, string> = {
+    'proj-1': 'Phase 2E: premium operator UX redesign and assistant canvas',
+    'proj-2': 'Implement Stripe payment webhook handlers and order fulfillment flow',
+  };
+
+  return {
+    id: proj.id,
+    name: proj.name,
+    status: (proj.status as ProjectStatus) ?? 'active',
+    mission: missions[proj.id] ?? proj.notes ?? 'No mission description set.',
+    activeAgent: agent?.name ?? undefined,
+    progress: index === 0 ? 72 : index === 1 ? 45 : 20,
+    lastAction: lastActions[proj.id],
+    nextAction: nextActions[proj.id],
+    openApprovals: index === 0 ? 2 : 0,
+    lastUpdated: proj.updatedAt,
+    tags: proj.notes ? proj.notes.split('/').map(s => s.trim()).filter(Boolean) : [],
+  };
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export function Projects() {
   const [projects, setProjects] = useState<PersistedProject[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<ProjectStatus | 'all'>('all');
 
   async function load() {
     setIsLoading(true);
     let stored = await settingsService.getProjects();
     if (stored.length === 0) {
-      // Seed from mock data on first run
       const seed = seedFromMock();
       await settingsService.saveProjects(seed);
       stored = seed;
     }
     setProjects(stored);
+    setActiveId(stored[0]?.id ?? null);
     setIsLoading(false);
   }
 
   useEffect(() => { load(); }, []);
 
-  const statusColor: Record<string, string> = {
-    active: 'bg-emerald-500',
-    archived: 'bg-zinc-500',
-    error: 'bg-rose-500',
-  };
+  const missions = projects
+    .map((p, i) => toMissionCard(p, i))
+    .filter(m => {
+      const matchesQuery =
+        query.length === 0 ||
+        m.name.toLowerCase().includes(query.toLowerCase()) ||
+        m.mission.toLowerCase().includes(query.toLowerCase());
+      const matchesStatus =
+        statusFilter === 'all' || m.status === statusFilter;
+      return matchesQuery && matchesStatus;
+    });
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="max-w-6xl mx-auto px-6 py-8 space-y-8">
+
+      {/* ── Header ─────────────────────────────────────────────────────── */}
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-white mb-1">Projects</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-white mb-1">
+            Projects
+          </h1>
           <p className="text-zinc-400 text-sm">
-            Manage workspaces and connected repositories
-            <span className="ml-2 text-xs text-zinc-600">(persisted · Phase 2B)</span>
+            Active missions and connected workspaces
           </p>
         </div>
-        <div className="flex items-center gap-2">
+
+        <div className="flex items-center gap-2 flex-shrink-0">
           <button
             onClick={load}
-            className="p-2 border border-zinc-800 bg-zinc-900 rounded-md text-zinc-400 hover:text-white transition"
-            title="Reload from storage"
+            className="p-2 border border-zinc-800 bg-zinc-900 rounded-xl text-zinc-400 hover:text-white hover:border-zinc-700 transition"
+            title="Refresh"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
-          <button className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-md text-sm font-medium transition">
-            <Plus className="w-4 h-4" />
+          <button className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[13px] font-semibold transition shadow-lg shadow-indigo-500/20">
+            <Plus className="w-3.5 h-3.5" />
             New Project
           </button>
         </div>
       </div>
 
+      {/* ── Search + filters ────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none" />
+          <input
+            type="text"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search projects..."
+            className="w-full pl-9 pr-4 py-2.5 bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600 rounded-xl text-zinc-300 placeholder:text-zinc-600 text-[14px] focus:outline-none transition"
+          />
+        </div>
+
+        {/* Status filters */}
+        <div className="flex items-center gap-1.5">
+          {(['all', 'active', 'paused', 'blocked', 'completed'] as const).map(f => (
+            <button
+              key={f}
+              onClick={() => setStatusFilter(f)}
+              className={`px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all ${
+                statusFilter === f
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-zinc-900/60 border border-zinc-800/60 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'
+              }`}
+            >
+              {f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Grid ────────────────────────────────────────────────────────── */}
       {isLoading ? (
-        <div className="flex items-center justify-center h-48 text-zinc-500 text-sm">
-          Loading projects…
+        <div className="flex items-center justify-center h-48">
+          <div className="flex items-center gap-3 text-zinc-500">
+            <RefreshCw className="w-4 h-4 animate-spin" />
+            <span className="text-sm">Loading projects…</span>
+          </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {projects.map(proj => (
-            <div
-              key={proj.id}
-              className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 transition cursor-pointer flex flex-col h-full"
-            >
-              <div className="flex items-start gap-3 mb-4">
-                <div className="w-10 h-10 rounded-lg bg-zinc-800 flex items-center justify-center shrink-0">
-                  <FolderGit2 className="w-5 h-5 text-indigo-400" />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="font-medium text-white truncate">{proj.name}</h3>
-                  {proj.repoUrl && (
-                    <p className="text-xs text-zinc-500 mt-0.5 truncate">{proj.repoUrl}</p>
-                  )}
-                </div>
-                <div
-                  className={`ml-auto w-2 h-2 rounded-full shrink-0 mt-1 ${statusColor[proj.status] ?? 'bg-zinc-500'}`}
-                  title={proj.status}
-                />
-              </div>
-
-              <div className="mt-auto space-y-2 pt-4 border-t border-zinc-800/50 text-xs text-zinc-500">
-                <div className="font-mono truncate" title={proj.localPath}>
-                  {proj.localPath || <span className="italic text-zinc-700">No local path set</span>}
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="bg-zinc-950 px-2 py-0.5 border border-zinc-800 rounded">
-                    {proj.notes || proj.defaultBranch}
-                  </span>
-                  <span className="text-zinc-700">
-                    {new Date(proj.updatedAt).toLocaleDateString()}
-                  </span>
-                </div>
-              </div>
-            </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {missions.map(mission => (
+            <Fragment key={mission.id}>
+              <ProjectMissionCard
+                project={mission}
+                isActive={mission.id === activeId}
+                onClick={() => setActiveId(mission.id)}
+              />
+            </Fragment>
           ))}
+
+          {/* New project CTA */}
+          <NewProjectCard />
+        </div>
+      )}
+
+      {!isLoading && missions.length === 0 && query.length > 0 && (
+        <div className="flex flex-col items-center justify-center py-16 text-zinc-500">
+          <Search className="w-8 h-8 mb-3 opacity-40" />
+          <p className="text-sm">No projects match "{query}"</p>
         </div>
       )}
     </div>

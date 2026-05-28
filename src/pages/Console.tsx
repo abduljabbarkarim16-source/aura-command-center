@@ -1,154 +1,262 @@
-import { useState } from 'react';
-import { Send, Terminal, Image as ImageIcon, Paperclip } from 'lucide-react';
+/**
+ * Console — Phase 2E Voice Core
+ *
+ * AURA opens directly into Voice Core — no launch gate or initiation step.
+ * Voice Core is the immediate default experience.
+ *
+ * Modes:
+ *   voiceCore    → AuraVoiceCore (default, shown immediately on load)
+ *   chatConsole  → Chat stream + composer (opened from Voice Core)
+ */
+
+import React, { useState, useMemo, Fragment } from 'react';
+import { Settings2, ArrowLeft } from 'lucide-react';
 import { mockMessages } from '../store/mockData';
 
-// Workspace components
-import { LocalhostPreviewPanel } from '../components/workspace/LocalhostPreviewPanel';
-import { WorkspaceSafetyPanel } from '../components/workspace/WorkspaceSafetyPanel';
-import { CommandApprovalQueue } from '../components/workspace/CommandApprovalQueue';
-import { GitWorkspacePanel } from '../components/workspace/GitWorkspacePanel';
-import { ArtifactPanel } from '../components/workspace/ArtifactPanel';
-import { ModelRouterPanel } from '../components/workspace/ModelRouterPanel';
+import { AuraVoiceCore }       from '../components/operator/AuraVoiceCore';
+import { AdminPanelOverlay }   from '../components/operator/AdminPanelOverlay';
+import { AuraComposer }        from '../components/operator/AuraComposer';
+import { OperatorRail }        from '../components/operator/OperatorRail';
+import { TechnicalDrawer }     from '../components/operator/TechnicalDrawer';
+import { AssistantMessage }    from '../components/operator/AssistantMessage';
+import { SessionDivider }      from '../components/operator/SystemEventCard';
+import { AuraPresenceDot }     from '../components/operator/AuraVoiceVisualizer';
+import { cn }                  from '../lib/utils';
 
-// Runtime components
-import { UsageMeter } from '../components/runtime/UsageMeter';
-import { BackgroundTasksPanel } from '../components/runtime/BackgroundTasksPanel';
+import type {
+  AuraMessage, SystemMessage, AgentHandoffMessage, ToolStatusMessage,
+} from '../components/operator/AssistantMessage';
+import type { VisualizerState } from '../components/operator/AuraVoiceVisualizer';
 
-// Voice component
-import { VoiceControlPanel } from '../components/voice/VoiceControlPanel';
+// ─── Mode type ────────────────────────────────────────────────────────────────
+
+type ConsoleMode = 'voiceCore' | 'chatConsole';
+
+// ─── Map legacy mockMessages → typed AuraMessage array ───────────────────────
+
+function toLegacyMessages(): AuraMessage[] {
+  return mockMessages.map(msg => {
+    if (msg.role === 'user') {
+      return { id: msg.id, type: 'user' as const, content: msg.content, timestamp: msg.timestamp };
+    }
+
+    if (msg.role === 'assistant') {
+      if (msg.toolCalls && msg.toolCalls.length > 0) {
+        const tc = msg.toolCalls[0];
+        return {
+          id: msg.id,
+          type: 'approval-request' as const,
+          timestamp: msg.timestamp,
+          agentId: msg.agentId,
+          title: `Tool Request — ${tc.name}`,
+          summary: `${msg.agentId ?? 'Agent'} requests permission to run ${tc.name}`,
+          riskLevel: 'medium' as const,
+          requestedAction: tc.name,
+          sourceAgent: msg.agentId ?? 'Agent',
+          targetAgent: 'local-shell',
+        };
+      }
+      return {
+        id: msg.id,
+        type: 'assistant' as const,
+        content: msg.content,
+        timestamp: msg.timestamp,
+        agentId: msg.agentId,
+        agentName: msg.agentId ?? 'AURA',
+      };
+    }
+
+    const content = msg.content;
+    const agentId = msg.agentId ?? '';
+
+    if (agentId.includes('Handoff') || content.toLowerCase().includes('handoff')) {
+      return {
+        id: msg.id,
+        type: 'agent-handoff' as const,
+        timestamp: msg.timestamp,
+        sourceAgent: 'Claude Architect',
+        targetAgent: 'Codex Dev',
+        objective: content,
+        status: 'pending' as const,
+      } satisfies AgentHandoffMessage;
+    }
+
+    if (agentId.includes('Runner') || content.toLowerCase().includes('dev server')) {
+      return {
+        id: msg.id,
+        type: 'tool-status' as const,
+        timestamp: msg.timestamp,
+        toolName: 'Dev Server',
+        status: 'completed' as const,
+        detail: 'localhost:5173 ready',
+      } satisfies ToolStatusMessage;
+    }
+
+    if (agentId.includes('Browser') || content.toLowerCase().includes('warning')) {
+      return {
+        id: msg.id,
+        type: 'tool-status' as const,
+        timestamp: msg.timestamp,
+        toolName: 'Browser Agent',
+        status: 'running' as const,
+        detail: 'DOM warning corrected',
+      } satisfies ToolStatusMessage;
+    }
+
+    return {
+      id: msg.id,
+      type: 'system' as const,
+      timestamp: msg.timestamp,
+      title: agentId || 'System',
+      summary: content,
+      expandable: content.length > 60,
+      detail: content,
+    } satisfies SystemMessage;
+  });
+}
+
+// ─── Console ──────────────────────────────────────────────────────────────────
 
 export function Console() {
-  const [activeTab, setActiveTab] = useState<'workspace' | 'artifacts' | 'runtime' | 'voice' | 'gitcmds'>('workspace');
+  // AURA opens directly into Voice Core — no initiation gate
+  const [mode,            setMode]            = useState<ConsoleMode>('voiceCore');
+  const [isDrawerOpen,    setIsDrawerOpen]    = useState(false);
+  const [isRailCollapsed, setIsRailCollapsed] = useState(true);
+  const [isAdminOpen,     setIsAdminOpen]     = useState(false);
+  const [auraState] = useState<VisualizerState>('idle');
 
+  const messages = useMemo(() => toLegacyMessages(), []);
+
+  // ── Voice Core mode (default, immediate) ────────────────────────
+  if (mode === 'voiceCore') {
+    return (
+      <div className="flex h-full min-h-0 w-full overflow-hidden bg-zinc-950">
+        <AuraVoiceCore
+          auraState={auraState}
+          onOpenConsole={() => setMode('chatConsole')}
+          onOpenAdminPanel={() => setIsAdminOpen(true)}
+          onOpenTechnicalDrawer={() => {
+            setIsAdminOpen(false);
+            setIsDrawerOpen(true);
+          }}
+        />
+
+        {/* Admin Panel Overlay */}
+        <AdminPanelOverlay
+          isOpen={isAdminOpen}
+          onClose={() => setIsAdminOpen(false)}
+          onOpenTechnicalDrawer={() => {
+            setIsAdminOpen(false);
+            setIsDrawerOpen(true);
+          }}
+        />
+
+        {/* Technical Drawer */}
+        <TechnicalDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
+      </div>
+    );
+  }
+
+  // ── Chat Console mode ────────────────────────────────────────────
   return (
-    <div className="flex h-full gap-4">
-      {/* Left Chat Console */}
-      <div className="flex-1 flex flex-col min-w-0 flex-shrink h-full">
-        <div className="mb-4 shrink-0">
-          <h1 className="text-2xl font-semibold tracking-tight text-white mb-1">AURA Console</h1>
-          <p className="text-zinc-400 text-sm">Active execution and inter-agent coordination</p>
-        </div>
+    <div className="flex h-full min-h-0 w-full overflow-hidden bg-zinc-950/20">
 
-        <div className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl flex flex-col min-h-0 overflow-hidden">
-          <div className="flex-1 overflow-y-auto p-4 space-y-6 min-h-0">
-            {mockMessages.map(msg => (
-              <div key={msg.id} className={`flex flex-col max-w-[85%] ${msg.role === 'user' ? 'ml-auto items-end' : 'mr-auto items-start'}`}>
-                <div className="flex items-center gap-2 mb-1 px-1">
-                  <span className="text-xs font-medium text-zinc-500">{msg.role === 'user' ? 'You' : msg.agentId || 'AURA'}</span>
-                  <span className="text-[10px] text-zinc-600">{new Date(msg.timestamp).toLocaleTimeString()}</span>
-                </div>
-                <div className={`p-3 rounded-2xl text-sm ${
-                  msg.role === 'user' 
-                    ? 'bg-indigo-600 text-white rounded-tr-sm' 
-                    : 'bg-zinc-800 text-zinc-200 rounded-tl-sm'
-                }`}>
-                  {msg.content}
-                </div>
-                
-                {msg.toolCalls && msg.toolCalls.length > 0 && (
-                  <div className="mt-2 space-y-2 w-full">
-                    {msg.toolCalls.map((tc, idx) => (
-                      <div key={idx} className="bg-zinc-950 border border-zinc-800 p-2 rounded-lg font-mono text-xs w-full max-w-full overflow-hidden">
-                        <div className="flex items-center gap-2 text-indigo-400 mb-1">
-                          <Terminal className="w-3 h-3" />
-                          {tc.name}
-                        </div>
-                        <div className="text-zinc-500 break-all">{tc.args}</div>
-                        {tc.result && (
-                          <div className="mt-2 pt-2 border-t border-zinc-900 text-zinc-400 break-all">
-                            {tc.result}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+      {/* Center stream */}
+      <div className="flex-1 flex flex-col min-w-0 h-full relative">
 
-          <div className="p-4 border-t border-zinc-800 bg-zinc-950 rounded-b-xl shrink-0">
-            <div className="flex items-end gap-2 bg-zinc-900 border border-zinc-800 rounded-xl p-2 focus-within:border-indigo-500 transition">
-              <button className="p-2 flex-shrink-0 text-zinc-400 hover:text-zinc-200 transition">
-                <Paperclip className="w-5 h-5" />
-              </button>
-              <textarea 
-                placeholder="Assign a task to the active agent..."
-                className="flex-1 bg-transparent border-none focus:outline-none text-zinc-200 text-sm resize-none max-h-32 min-h-[40px] py-2"
-                rows={1}
-              />
-              <button className="p-2 flex-shrink-0 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition">
-                <Send className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="flex items-center gap-4 mt-2 px-2 text-xs text-zinc-500">
-              <span className="flex items-center gap-1 cursor-pointer hover:text-zinc-300 transition">
-                <ImageIcon className="w-3 h-3" /> Include Context
-              </span>
-              <span>Press Enter to send, Shift+Enter for new line</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Right Sidebar - Grouped Panels */}
-      <div className="w-[420px] flex-shrink-0 flex flex-col h-full min-h-0 bg-zinc-950 pt-[3.25rem]">
-        {/* Tab Navigation */}
-        <div className="flex gap-1.5 p-1 bg-zinc-900 border border-zinc-800 rounded-lg shrink-0 mb-4 overflow-x-auto no-scrollbar whitespace-nowrap">
-          {[
-            { id: 'workspace', label: 'Workspace' },
-            { id: 'artifacts', label: 'Artifacts' },
-            { id: 'runtime', label: 'Runtime' },
-            { id: 'voice', label: 'Voice' },
-            { id: 'gitcmds', label: 'Git / Cmds' },
-          ].map(tab => (
+        {/* Top bar */}
+        <div className="absolute top-0 left-0 right-0 h-14 bg-gradient-to-b from-zinc-950 via-zinc-950/85 to-transparent z-10 flex items-center justify-between px-6 pointer-events-none">
+          <div className="flex items-center gap-3 pointer-events-auto">
             <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
-                activeTab === tab.id 
-                  ? 'bg-zinc-800 text-white shadow-sm' 
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
-              }`}
+              onClick={() => setMode('voiceCore')}
+              className={cn(
+                'flex items-center gap-2 px-3 py-1.5',
+                'bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/25',
+                'text-indigo-400 hover:text-indigo-300 rounded-lg text-[12px] font-medium transition-colors',
+              )}
             >
-              {tab.label}
+              <ArrowLeft className="w-3.5 h-3.5" />
+              Voice Core
             </button>
-          ))}
+
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 flex items-center justify-center">
+                <AuraPresenceDot state={auraState} />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[13px] font-semibold tracking-wide text-zinc-200">AURA</span>
+                <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Console
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 pointer-events-auto">
+            <button
+              onClick={() => setIsAdminOpen(true)}
+              className={cn(
+                'flex items-center gap-2 px-3 py-1.5',
+                'bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800/80',
+                'text-zinc-400 hover:text-zinc-200 rounded-lg text-[13px] font-medium transition backdrop-blur-md',
+              )}
+            >
+              Admin
+            </button>
+            <button
+              onClick={() => setIsDrawerOpen(true)}
+              className={cn(
+                'flex items-center gap-2 px-3 py-1.5',
+                'bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800/80',
+                'text-zinc-400 hover:text-zinc-200 rounded-lg text-[13px] font-medium transition backdrop-blur-md',
+              )}
+            >
+              <Settings2 className="w-4 h-4" />
+              Details
+            </button>
+          </div>
         </div>
 
-        {/* Tab Content Area */}
-        <div className="flex-1 min-h-0 overflow-y-auto w-full pb-4 pr-1 space-y-4 no-scrollbar">
-          {activeTab === 'workspace' && (
-            <>
-              <LocalhostPreviewPanel />
-              <WorkspaceSafetyPanel />
-            </>
-          )}
-          
-          {activeTab === 'artifacts' && (
-            <ArtifactPanel />
-          )}
-          
-          {activeTab === 'runtime' && (
-            <>
-              <ModelRouterPanel />
-              <UsageMeter />
-              <BackgroundTasksPanel />
-            </>
-          )}
+        {/* Message stream */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar pt-20 pb-4">
+          <div className="max-w-4xl mx-auto w-full px-4 flex flex-col gap-4">
+            <SessionDivider label="Session" />
+            {messages.map(msg => (
+              <Fragment key={msg.id}>
+                <AssistantMessage msg={msg} />
+              </Fragment>
+            ))}
+            <div className="h-4" />
+          </div>
+        </div>
 
-          {activeTab === 'voice' && (
-            <VoiceControlPanel />
-          )}
-
-          {activeTab === 'gitcmds' && (
-            <>
-              <CommandApprovalQueue />
-              <GitWorkspacePanel />
-            </>
-          )}
+        {/* Composer */}
+        <div className="shrink-0 pt-2 pb-6 px-4 bg-gradient-to-t from-zinc-950 via-zinc-950 to-transparent">
+          <div className="max-w-4xl mx-auto w-full">
+            <AuraComposer />
+          </div>
         </div>
       </div>
+
+      {/* Right Rail */}
+      <OperatorRail
+        isCollapsed={isRailCollapsed}
+        onToggle={() => setIsRailCollapsed(prev => !prev)}
+      />
+
+      {/* Admin Panel Overlay */}
+      <AdminPanelOverlay
+        isOpen={isAdminOpen}
+        onClose={() => setIsAdminOpen(false)}
+        onOpenTechnicalDrawer={() => {
+          setIsAdminOpen(false);
+          setIsDrawerOpen(true);
+        }}
+      />
+
+      {/* Technical Drawer */}
+      <TechnicalDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
     </div>
   );
 }

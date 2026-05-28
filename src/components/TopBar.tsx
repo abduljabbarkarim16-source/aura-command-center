@@ -1,29 +1,48 @@
-import { Folders, Bot, ChevronDown } from 'lucide-react';
+import { Folders, Bot, ChevronDown, Keyboard } from 'lucide-react';
 import { mockProjects, mockAgents } from '../store/mockData';
 
 export function TopBar() {
   const activeProj = mockProjects[0];
-  const activeAgent = mockAgents.find(a => a.id === activeProj.activeAgentId) || mockAgents[0];
+  const activeAgent = mockAgents.find(a => a.id === activeProj.activeAgentId) ?? mockAgents[0];
+
+  const agentStatusColor: Record<string, string> = {
+    idle:    'bg-zinc-500',
+    working: 'bg-amber-400 animate-pulse',
+    error:   'bg-rose-500',
+  };
 
   return (
-    <header className="h-16 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between px-6 shrink-0 z-10 w-full">
-      <div className="flex items-center gap-6">
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-md cursor-pointer hover:border-zinc-700 transition">
-          <Folders className="w-4 h-4 text-zinc-400" />
-          <span className="text-sm font-medium text-zinc-200">{activeProj.name}</span>
-          <ChevronDown className="w-4 h-4 text-zinc-500 ml-2" />
-        </div>
+    <header className="h-14 bg-zinc-900/80 backdrop-blur-sm border-b border-zinc-800/60 flex items-center justify-between px-5 shrink-0 z-10 w-full">
+
+      {/* Left: project switcher */}
+      <div className="flex items-center gap-4">
+        <button className="flex items-center gap-2 px-3 py-1.5 bg-zinc-950/60 hover:bg-zinc-800 border border-zinc-800/80 hover:border-zinc-700 rounded-lg cursor-pointer transition-colors group">
+          <Folders className="w-3.5 h-3.5 text-zinc-500 group-hover:text-zinc-300 transition-colors" />
+          <span className="text-[13px] font-medium text-zinc-300 group-hover:text-zinc-100 transition-colors">
+            {activeProj.name}
+          </span>
+          <ChevronDown className="w-3.5 h-3.5 text-zinc-600 group-hover:text-zinc-400 ml-1 transition-colors" />
+        </button>
       </div>
 
-      <div className="flex items-center gap-4">
-        <div className="text-xs text-zinc-500 font-mono">
-          Model: {activeAgent.model}
+      {/* Right: keyboard hint + active agent */}
+      <div className="flex items-center gap-3">
+        {/* Command palette hint */}
+        <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-zinc-600">
+          <Keyboard className="w-3.5 h-3.5" />
+          <kbd className="px-1.5 py-0.5 bg-zinc-800 text-zinc-500 rounded border border-zinc-700/50 text-[10px] font-mono">
+            Ctrl+K
+          </kbd>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-md cursor-pointer hover:bg-indigo-500/20 transition">
-          <Bot className="w-4 h-4 text-indigo-400" />
-          <span className="text-sm font-medium text-indigo-300">{activeAgent.name}</span>
-          <div className="w-2 h-2 rounded-full bg-amber-400 ml-1 animate-pulse"></div>
-        </div>
+
+        <div className="h-4 w-px bg-zinc-800 hidden sm:block" />
+
+        {/* Active agent pill */}
+        <button className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 rounded-lg cursor-pointer transition-all group">
+          <Bot className="w-3.5 h-3.5 text-indigo-400" />
+          <span className="text-[13px] font-medium text-indigo-300">{activeAgent.name}</span>
+          <div className={`w-2 h-2 rounded-full ml-0.5 flex-shrink-0 ${agentStatusColor[activeAgent.status] ?? 'bg-zinc-500'}`} />
+        </button>
       </div>
     </header>
   );
