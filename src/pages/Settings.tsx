@@ -423,6 +423,23 @@ export function Settings() {
           checked={settings.assistantMuted}
           onChange={assistantMuted => handleUpdate({ assistantMuted })}
         />
+
+        {/* Voice Runtime info card — Phase 2F */}
+        <div className="mx-5 mb-5 mt-1 p-3 rounded-lg border border-zinc-800/60 bg-zinc-900/40 flex items-start gap-3">
+          <Cpu className="w-4 h-4 text-indigo-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-xs font-semibold text-zinc-300 mb-0.5">
+              Voice Runtime — Mock Mode
+            </p>
+            <p className="text-[11px] text-zinc-500 leading-relaxed">
+              Phase 2F: All voice state is managed by the local VoiceRuntimeService.
+              No microphone access, no API calls. Real STT/TTS integration lands in Phase 3.
+            </p>
+            <p className="text-[11px] text-indigo-400/80 mt-1 font-medium">
+              Mode: mock · Source: local event bus
+            </p>
+          </div>
+        </div>
       </CollapsibleSection>
 
       {/* ── Artifacts ── */}

@@ -612,4 +612,133 @@ Provider Capability card.
 
 ---
 
-*End of design brief — Phase 2E (including Voice Core correction and Voice Output Quality Plan)*
+---
+
+## §16 Phase 2F — Voice Runtime Foundation
+
+**Branch:** `phase-2f-voice-runtime-foundation`
+
+### Goal
+
+Replace scattered hardcoded mock state in UI components with a central, event-driven
+runtime layer that the Voice Core subscribes to. All state transitions are explicit
+method calls; components become pure consumers of runtime snapshots.
+
+### Event Bus Model
+
+```
+Admin action            ──▶ voiceRuntimeService.startListening()
+Button click            ──▶ voiceRuntimeService.stopListening()
+Approval button         ──▶ voiceRuntimeService.resolveApproval(id, decision)
+Demo button             ──▶ voiceRuntimeService.runDemoSequence()
+
+VoiceRuntimeService (singleton)
+  ├── emits VoiceRuntimeEvent (type + payload)
+  ├── calls NotificationService.add() for bridge events
+  └── broadcasts VoiceRuntimeSnapshot to all listeners
+
+useVoiceRuntime() hook
+  ├── subscribes to VoiceRuntimeService
+  ├── returns VoiceRuntimeSnapshot fields (flat spread)
+  └── exposes bound action methods
+
+AuraVoiceCore component
+  ├── calls useVoiceRuntime()
+  ├── maps runtime.state → VisualizerState (RUNTIME_TO_VISUALIZER table)
+  ├── maps runtime.activeSpeaker → AdminVoiceState
+  ├── renders ApprovalTray from runtime.pendingApprovals[0]
+  └── calls runtime actions on user interaction
+```
+
+### Runtime States
+
+| VoiceRuntimeState    | VisualizerState       | Orb behaviour                          |
+|----------------------|-----------------------|----------------------------------------|
+| ready                | idle                  | gentle breathe animation, silent       |
+| listening            | listening             | high-energy spectrum ring, admin amber |
+| thinking             | thinking              | low-energy ambient pulse               |
+| speaking             | speaking              | full spectrum ring, aura indigo        |
+| waiting_for_approval | waiting_for_approval  | paused low glow, badge pulses          |
+| executing            | executing             | medium structured bars                 |
+| error                | error                 | dim red tint                           |
+| muted                | idle                  | same as idle, mic icon crossed         |
+
+### Visualizer Subscription
+
+The `AuraVoiceVisualizer` component receives:
+- `state` → drives `useMockAudioReactivity(state)` internal energy profile
+- `source` → colors SVG spectrum ring (`aura`=indigo, `admin`=amber, `system`=zinc)
+
+Source is derived from `runtime.activeSpeaker`:
+- `admin` speaking → source `'admin'` (amber spectrum ring)
+- `aura` speaking → source `'aura'` (indigo/state-color ring)
+- `system` / thinking → source `'system'` (zinc quiet ring)
+
+### How Approvals Become Runtime Events
+
+1. `voiceRuntimeService.requestApproval(data)` is called (from demo, real agent, etc.)
+2. Service creates a `VoiceApprovalRequest`, pushes to `_pendingApprovals`
+3. Service transitions to `waiting_for_approval` state
+4. Service emits `approval_requested` event → NotificationService creates approval toast
+5. Zone 1 badge count updates (pendingApprovals.length)
+6. Admin clicks badge → `isTrayOpen` toggles → ApprovalTray opens on the right
+7. Admin clicks Approve/Reject → `resolveApproval(id, decision)`
+8. Service marks approval resolved, removes after 1200 ms
+9. Service emits `approval_resolved` → success/info toast
+10. Tray auto-closes when pendingApprovals drains to zero
+
+### How Notifications Are Generated
+
+| Runtime Event        | Notification Type | TTL       |
+|----------------------|-------------------|-----------|
+| approval_requested   | approval          | persistent|
+| approval_resolved    | success / info    | 4 s       |
+| memory_updated       | memory            | 4 s       |
+| relay_ready          | relay             | 5 s       |
+| handoff_created      | info              | 4 s       |
+| tool_locked          | warning           | 4 s       |
+| error                | danger            | 6 s       |
+
+All bridge logic lives in `VoiceRuntimeService.handleNotificationBridge()`.
+Components never call `notificationService.add()` directly for runtime events.
+
+### No Real APIs — Phase 2F Scope
+
+- No real microphone capture (`getUserMedia` NOT called)
+- No real STT (`SpeechRecognition` NOT used)
+- No real TTS (`speechSynthesis` NOT used)
+- No provider API calls
+- No API keys
+
+All state transitions are driven by `setTimeout`-based demo sequences or
+direct button interactions. The service is architected so that future
+real integrations only change the service internals.
+
+### Future STT/TTS Integration (Phase 3+)
+
+```
+// In VoiceRuntimeService.startListening() — future real implementation:
+// 1. Request microphone permission via navigator.mediaDevices.getUserMedia
+// 2. Pipe stream into SpeechRecognition or a Whisper endpoint
+// 3. On transcript → emit aura_started_thinking, call startThinking()
+// 4. On AURA response → call startSpeaking(text)
+// 5. Send text to TTS provider (OpenAI TTS, ElevenLabs, Windows SAPI)
+// 6. On audio end → call stopSpeaking()
+//
+// Components and the hook need zero changes — only the service body changes.
+```
+
+### Files Created / Modified
+
+| File | Status |
+|------|--------|
+| `src/types/voice-runtime.ts` | Created |
+| `src/services/voice/VoiceRuntimeService.ts` | Created |
+| `src/hooks/useVoiceRuntime.ts` | Created |
+| `src/components/operator/AuraVoiceCore.tsx` | Updated (wired to runtime) |
+| `docs/aura-premium-ui-design-brief.md` | Updated (this section) |
+| `docs/voice-runtime-architecture.md` | Created |
+
+---
+
+*End of design brief — Phase 2E + 2F (Voice Core UX + Voice Runtime Foundation)*
