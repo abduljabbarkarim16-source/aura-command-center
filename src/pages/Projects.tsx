@@ -6,7 +6,7 @@
  */
 
 import React, { useEffect, useState, Fragment } from 'react';
-import { RefreshCw, Search } from 'lucide-react';
+import { RefreshCw, Search, Plus } from 'lucide-react';
 import { mockProjects, mockAgents } from '../store/mockData';
 import { settingsService } from '../services/settings/SettingsService';
 import type { PersistedProject } from '../types/persistence';
@@ -77,6 +77,7 @@ export function Projects() {
   const [isLoading, setIsLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<ProjectStatus | 'all'>('all');
 
   async function load() {
     setIsLoading(true);
@@ -95,11 +96,15 @@ export function Projects() {
 
   const missions = projects
     .map((p, i) => toMissionCard(p, i))
-    .filter(m =>
-      query.length === 0 ||
-      m.name.toLowerCase().includes(query.toLowerCase()) ||
-      m.mission.toLowerCase().includes(query.toLowerCase())
-    );
+    .filter(m => {
+      const matchesQuery =
+        query.length === 0 ||
+        m.name.toLowerCase().includes(query.toLowerCase()) ||
+        m.mission.toLowerCase().includes(query.toLowerCase());
+      const matchesStatus =
+        statusFilter === 'all' || m.status === statusFilter;
+      return matchesQuery && matchesStatus;
+    });
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8 space-y-8">
@@ -123,19 +128,42 @@ export function Projects() {
           >
             <RefreshCw className="w-4 h-4" />
           </button>
+          <button className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[13px] font-semibold transition shadow-lg shadow-indigo-500/20">
+            <Plus className="w-3.5 h-3.5" />
+            New Project
+          </button>
         </div>
       </div>
 
-      {/* ── Search ─────────────────────────────────────────────────────── */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none" />
-        <input
-          type="text"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder="Search projects..."
-          className="w-full pl-9 pr-4 py-2.5 bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600 rounded-xl text-zinc-300 placeholder:text-zinc-600 text-[14px] focus:outline-none transition"
-        />
+      {/* ── Search + filters ────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none" />
+          <input
+            type="text"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search projects..."
+            className="w-full pl-9 pr-4 py-2.5 bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600 rounded-xl text-zinc-300 placeholder:text-zinc-600 text-[14px] focus:outline-none transition"
+          />
+        </div>
+
+        {/* Status filters */}
+        <div className="flex items-center gap-1.5">
+          {(['all', 'active', 'paused', 'blocked', 'completed'] as const).map(f => (
+            <button
+              key={f}
+              onClick={() => setStatusFilter(f)}
+              className={`px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all ${
+                statusFilter === f
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-zinc-900/60 border border-zinc-800/60 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'
+              }`}
+            >
+              {f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ── Grid ────────────────────────────────────────────────────────── */}

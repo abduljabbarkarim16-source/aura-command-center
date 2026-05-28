@@ -1,5 +1,5 @@
 import React, { useState, useMemo, Fragment } from 'react';
-import { Settings2, Bot } from 'lucide-react';
+import { Settings2 } from 'lucide-react';
 import { mockMessages } from '../store/mockData';
 
 import { AuraLaunchScreen } from '../components/operator/AuraLaunchScreen';
@@ -8,8 +8,10 @@ import { OperatorRail } from '../components/operator/OperatorRail';
 import { TechnicalDrawer } from '../components/operator/TechnicalDrawer';
 import { AssistantMessage } from '../components/operator/AssistantMessage';
 import { SessionDivider } from '../components/operator/SystemEventCard';
+import { AuraPresenceDot } from '../components/operator/AuraVoiceVisualizer';
 import { cn } from '../lib/utils';
 import type { AuraMessage, SystemMessage, AgentHandoffMessage, ToolStatusMessage } from '../components/operator/AssistantMessage';
+import type { VisualizerState } from '../components/operator/AuraVoiceVisualizer';
 
 // ─── Map legacy mockMessages → typed AuraMessage array ───────────────────────
 
@@ -103,6 +105,7 @@ export function Console() {
   const [hasInitiated, setHasInitiated] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isRailCollapsed, setIsRailCollapsed] = useState(true);
+  const [auraState] = useState<VisualizerState>('idle');
 
   const messages = useMemo(() => toLegacyMessages(), []);
 
@@ -118,11 +121,12 @@ export function Console() {
         {/* Minimalist Top Nav */}
         <div className="absolute top-0 left-0 right-0 h-14 bg-gradient-to-b from-zinc-950 via-zinc-950/85 to-transparent z-10 flex items-center justify-between px-6 pointer-events-none">
           <div className="flex items-center gap-3 pointer-events-auto">
-            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-500/10 border border-indigo-500/20">
-              <Bot className="w-4 h-4 text-indigo-400" />
+            {/* Presence dot with voice state */}
+            <div className="w-8 h-8 flex items-center justify-center">
+              <AuraPresenceDot state={auraState} />
             </div>
             <div className="flex flex-col">
-              <span className="text-sm font-semibold tracking-wide text-zinc-200">AURA</span>
+              <span className="text-[13px] font-semibold tracking-wide text-zinc-200">AURA</span>
               <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 Active & Monitoring

@@ -1,6 +1,7 @@
 import React from 'react';
-import { Orbit, Shield, Power, Activity, Database, Zap, Terminal, Network } from 'lucide-react';
+import { Shield, Power, Activity, Database, Zap, Terminal, Network } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { AuraVoiceVisualizer } from './AuraVoiceVisualizer';
 
 interface AuraLaunchScreenProps {
   onInitiate: () => void;
@@ -47,12 +48,14 @@ export function AuraLaunchScreen({ onInitiate }: AuraLaunchScreenProps) {
 
       <div className="flex flex-col items-center max-w-lg w-full px-6 py-12 text-center animate-in fade-in slide-in-from-bottom-8 duration-700">
 
-        {/* ── Glowing Orb ─────────────────────────────────────────────── */}
+        {/* ── Voice Visualizer (replaces static orb) ───────────────── */}
         <div className="relative mb-8">
-          <div className="absolute inset-0 bg-indigo-500/20 blur-3xl rounded-full scale-150 animate-pulse" />
-          <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-indigo-500 to-indigo-700 shadow-[0_0_40px_rgba(79,70,229,0.4)] flex items-center justify-center relative z-10">
-            <Orbit className="w-12 h-12 text-white" />
-          </div>
+          <AuraVoiceVisualizer
+            state="idle"
+            size="xl"
+            showLabel={false}
+            amplitude={0.4}
+          />
         </div>
 
         {/* ── Branding ────────────────────────────────────────────────── */}

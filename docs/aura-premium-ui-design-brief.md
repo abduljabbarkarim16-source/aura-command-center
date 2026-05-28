@@ -225,4 +225,113 @@ These surfaces signal roadmap without breaking the UX.
 
 ---
 
-*End of design brief — Phase 2E*
+---
+
+## 13. Phase 2E Deep Refinement — Research Notes
+
+### 13.1 Inspiration Sources (Public, Original Implementation)
+
+Reviewed public screenshots, documentation, and general knowledge of:
+- **ChatGPT voice mode UI** — floating orb with waveform, clean status strip, no visible controls during listening
+- **Claude.ai interface** — calm dark UI, centered conversation, minimalist top nav, no sidebar noise
+- **Codex/GPT-4o agent IDEs** — console-dominant with gated approval flows
+- **Linear's dashboard** — compact stat cards, section headers, "View details" deflection
+- **Raycast** — command palette with grouped commands, description text, keyboard hints
+
+No proprietary assets, CSS, or source code were copied. All implementations are original.
+
+### 13.2 Final UI Principles (Phase 2E Deep Refinement)
+
+**Default visible UI:**
+- AURA voice presence (orb/visualizer)
+- Active mission card
+- Active agent indicator
+- Central conversation
+- One approval card if pending
+- Compact status strip
+- Voice-first composer with quick chips
+
+**Hidden by default (accessible via Technical Details / Command Palette):**
+- Debug logs
+- Model router internals
+- Workspace technical details
+- Git command queue
+- Usage meters
+- Long relay forms
+- Raw JSON / developer data
+
+**Calm, premium, restrained aesthetic:**
+- No sci-fi animations beyond purposeful state indicators
+- No pulsing decorations unless conveying live state
+- Color used to communicate status, not decorate
+- Spacing generous but not wasteful
+
+### 13.3 Voice Interaction Model
+
+```
+idle          → zinc dot, slow breathing
+listening     → indigo orb, rings expanding, waveform bars animate
+thinking      → violet, spinning inner ring
+speaking      → emerald, fast waveform bars
+waiting_approval → amber, gentle pulse
+executing     → orange, fast spin
+error         → rose, sharp pulse
+```
+
+**No real audio capture in Phase 2E.** Voice buttons are clearly labeled as placeholders.
+Future hookup: replace mock amplitude with `AnalyserNode.getByteFrequencyData()` values.
+
+### 13.4 Approval Card Model
+
+Every external action that has side effects goes through an approval gate:
+- Risk level: `low` / `medium` / `high` / `critical`
+- Left border color encodes risk
+- Three action buttons: Approve / Reject / Details
+- Status variants: pending (interactive), approved (dimmed), rejected (dimmed)
+- Approval requests surface in: Relay page, OperatorStack panel, Dashboard, Console inline
+
+### 13.5 Project / Workspace Model
+
+```
+ProjectMission {
+  id, name, status (active|paused|blocked|completed|draft)
+  mission        // 1-2 sentence objective
+  activeAgent    // assigned agent name
+  progress       // 0-100
+  lastAction     // what was completed
+  nextAction     // what comes next
+  openApprovals  // count of pending approval gates
+  lastUpdated    // ISO timestamp
+  tags           // tech stack tags
+}
+```
+
+Filters: All | Active | Paused | Blocked | Completed
+
+### 13.6 Provider Capability Safety Model
+
+**RULES (inviolable):**
+1. Never display API key values, not even partially masked
+2. Only perform a truthy length check on `import.meta.env[KEY]`
+3. Never log, store, or transmit key values
+4. Never run paid API calls automatically (unattended loops prohibited)
+5. `.env` is never committed — `.env.example` contains placeholder names only
+
+**Status labels:** CONFIGURED / NOT SET / READY (no key needed) / PLANNED / CONCEPT
+
+### 13.7 Dispatcher / Remote Capability Future Model
+
+All future distributed capabilities are surfaced as placeholder cards with tier badges:
+
+| Feature | Tier | Notes |
+|---|---|---|
+| Dispatcher Mode | PLANNED | Autonomous multi-agent task distribution |
+| Remote Relay Channel | PLANNED | Secure tunnel command relay |
+| Mobile Approval Channel | PLANNED | Push approval to mobile device |
+| Oracle / OpenClaude | CONCEPT | Deep reasoning synthesis agent |
+
+**No networking, no port exposure, no real mobile connection in Phase 2E.**
+
+---
+
+*End of design brief — Phase 2E (including Deep Refinement pass)*

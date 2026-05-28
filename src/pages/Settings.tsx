@@ -1,5 +1,6 @@
 import { Fragment } from 'react';
 import type { ReactNode } from 'react';
+import { ProviderCapabilityCard } from '../components/operator/ProviderCapabilityCard';
 import {
   Settings2,
   Route,
@@ -538,6 +539,11 @@ export function Settings() {
           </p>
         </div>
       </CollapsibleSection>
+
+      {/* ── Provider Capability Audit ── */}
+      <div>
+        <ProviderCapabilityCard />
+      </div>
 
       {/* ── Import / Export ── */}
       <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
