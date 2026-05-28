@@ -36,10 +36,10 @@ const STATE_CFG: Record<AdminVoiceState, {
 }> = {
   idle: {
     label: 'Admin',
-    labelColor: 'text-zinc-600',
-    barColor: 'bg-zinc-700/50',
-    dotColor: 'bg-zinc-700',
-    icon: <Mic className="w-3 h-3 text-zinc-700" />,
+    labelColor: 'text-zinc-500',
+    barColor: 'bg-zinc-600',
+    dotColor: 'bg-zinc-600',
+    icon: <Mic className="w-3 h-3 text-zinc-500" />,
     animate: false,
   },
   speaking: {

@@ -123,19 +123,21 @@ export const MOCK_THOUGHTS: Thought[] = [
 interface AuraThoughtStackProps {
   /** Max visible thought cards */
   maxVisible?: number;
+  /** Which MOCK_THOUGHTS index to start from (wraps). Default 0. */
+  initialIndex?: number;
   className?: string;
 }
 
-export function AuraThoughtStack({ maxVisible = 3, className }: AuraThoughtStackProps) {
+export function AuraThoughtStack({ maxVisible = 3, initialIndex = 0, className }: AuraThoughtStackProps) {
   const [active, setActive] = useState<Thought[]>([]);
-  const indexRef = useRef(0);
+  const indexRef = useRef(initialIndex);
 
-  // Seed first thought
+  // Seed first thought from initialIndex
   useEffect(() => {
-    const first = MOCK_THOUGHTS[0];
+    const first = MOCK_THOUGHTS[initialIndex % MOCK_THOUGHTS.length];
     setActive([{ ...first, id: `${first.id}-${Date.now()}` }]);
-    indexRef.current = 1;
-  }, []);
+    indexRef.current = initialIndex + 1;
+  }, [initialIndex]);
 
   // Rotate thoughts
   useEffect(() => {

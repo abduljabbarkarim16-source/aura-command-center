@@ -45,7 +45,7 @@ const STATE_CONFIG: Record<VisualizerState, {
   idle: {
     label: 'Idle',
     orbColor: 'from-zinc-700 to-zinc-800',
-    glowColor: 'rgba(113,113,122,0.15)',
+    glowColor: 'rgba(99,102,241,0.09)',
     ringColor: 'bg-zinc-700/30',
     barColor: 'bg-zinc-600',
     labelColor: 'text-zinc-500',
@@ -190,9 +190,18 @@ export function AuraVoiceVisualizer({
             cfg.orbColor,
             isActive && 'animate-pulse',
           )}
-          style={isActive ? {
-            animationDuration: state === 'speaking' ? '0.6s' : state === 'listening' ? '1s' : '2s',
-          } : undefined}
+          style={
+            isActive
+              ? { animationDuration: state === 'speaking' ? '0.6s' : state === 'listening' ? '1s' : '2s' }
+              : state === 'idle'
+              ? {
+                  animationName: 'idle-breathe',
+                  animationDuration: '5s',
+                  animationTimingFunction: 'ease-in-out',
+                  animationIterationCount: 'infinite',
+                }
+              : undefined
+          }
         >
           {/* Waveform bars inside orb (only in active states) */}
           {(state === 'speaking' || state === 'listening') && (
@@ -261,19 +270,25 @@ export function AuraVoiceVisualizer({
   );
 }
 
-// ─── Inline style injection for bar-bounce keyframe ───────────────────────────
+// ─── Inline style injection for keyframes ─────────────────────────────────────
 
-// We inject the @keyframes directly so it works with Tailwind 4 without plugin config
-const barBounceStyle =
-  typeof document !== 'undefined' && !document.getElementById('aura-bar-bounce')
+// Injected once at module load; id guards against duplicate insertion.
+const auraKeyframesStyle =
+  typeof document !== 'undefined' && !document.getElementById('aura-keyframes')
     ? Object.assign(document.createElement('style'), {
-        id: 'aura-bar-bounce',
-        textContent: `@keyframes bar-bounce { from { transform: scaleY(0.3); } to { transform: scaleY(1.2); } }`,
+        id: 'aura-keyframes',
+        textContent: [
+          `@keyframes bar-bounce { from { transform: scaleY(0.3); } to { transform: scaleY(1.2); } }`,
+          `@keyframes idle-breathe {`,
+          `  0%, 100% { opacity: 0.72; transform: scale(1); }`,
+          `  50%       { opacity: 1;    transform: scale(1.035); }`,
+          `}`,
+        ].join('\n'),
       })
     : null;
 
-if (barBounceStyle && typeof document !== 'undefined') {
-  document.head.appendChild(barBounceStyle);
+if (auraKeyframesStyle && typeof document !== 'undefined') {
+  document.head.appendChild(auraKeyframesStyle);
 }
 
 // ─── Compact inline orb (for top nav / status strip) ─────────────────────────
