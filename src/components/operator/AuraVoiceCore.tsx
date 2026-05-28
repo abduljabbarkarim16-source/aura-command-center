@@ -11,7 +11,8 @@
  *  Zone 1 — absolute status strip (no flex height)
  *  Zone 2 — mission card (shrink-0)
  *  Zone 3 — orb + admin indicator (flex-1, center reserved for visualizer)
- *  Zone 4 — approval card (shrink-0)
+ *  Zone 4 — REMOVED: approval cards no longer live in the center flow.
+ *            ApprovalTray renders as an absolute right-side panel instead.
  *  Zone 5 — bottom action strip (shrink-0)
  */
 
@@ -23,7 +24,8 @@ import {
 import { cn } from '../../lib/utils';
 import { AuraVoiceVisualizer, type VisualizerState } from './AuraVoiceVisualizer';
 import { AdminVoiceIndicator, type AdminVoiceState } from './AdminVoiceIndicator';
-import { ApprovalCard, type ApprovalCardProps } from './ApprovalCard';
+import { ApprovalTray } from './ApprovalTray';
+import type { ApprovalCardProps } from './ApprovalCard';
 import { NotificationCenter } from './NotificationCenter';
 import { NotificationToast } from './NotificationToast';
 import { notificationService } from '../../services/notifications/NotificationService';
@@ -58,6 +60,15 @@ const MOCK_APPROVAL: ApprovalCardProps = {
   targetAgent:     'local-shell',
 };
 
+// ─── Approval badge risk colors (Zone 1) ─────────────────────────────────────
+
+const BADGE_RISK: Record<string, { bg: string; border: string; text: string }> = {
+  low:      { bg: 'bg-emerald-500/15', border: 'border-emerald-500/30', text: 'text-emerald-400' },
+  medium:   { bg: 'bg-amber-500/15',   border: 'border-amber-500/30',   text: 'text-amber-400'  },
+  high:     { bg: 'bg-red-500/15',     border: 'border-red-500/30',     text: 'text-red-400'    },
+  critical: { bg: 'bg-rose-500/15',    border: 'border-rose-500/30',    text: 'text-rose-400'   },
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface AuraVoiceCoreProps {
@@ -83,6 +94,7 @@ export function AuraVoiceCore({
   const [isListening,       setIsListening]       = useState(false);
   const [approvalDismissed, setApprovalDismissed] = useState(false);
   const [approvalStatus,    setApprovalStatus]    = useState<'pending' | 'approved' | 'rejected'>('pending');
+  const [isTrayOpen,        setIsTrayOpen]        = useState(false);
   const [missionExpanded,   setMissionExpanded]   = useState(false);
   const [safeMode,          setSafeMode]          = useState(externalSafeMode ?? false);
 
@@ -162,12 +174,23 @@ export function AuraVoiceCore({
               </button>
             </div>
           )}
-          {showApproval && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/15 border border-amber-500/30 rounded-full animate-pulse">
-              <Shield className="w-3 h-3 text-amber-400" />
-              <span className="text-[11px] text-amber-400 font-semibold">1 Approval</span>
-            </div>
-          )}
+          {showApproval && (() => {
+            const badge = BADGE_RISK[MOCK_APPROVAL.riskLevel] ?? BADGE_RISK.medium;
+            return (
+              <button
+                onClick={() => setIsTrayOpen(p => !p)}
+                title={isTrayOpen ? 'Hide approval' : 'Show approval'}
+                className={cn(
+                  'flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-colors',
+                  badge.bg, badge.border,
+                  !isTrayOpen && 'animate-pulse',
+                )}
+              >
+                <Shield className={cn('w-3 h-3', badge.text)} />
+                <span className={cn('text-[11px] font-semibold', badge.text)}>1 Approval</span>
+              </button>
+            );
+          })()}
           {/* Notification bell */}
           <NotificationCenter />
         </div>
@@ -230,27 +253,19 @@ export function AuraVoiceCore({
         </div>
       </div>
 
-      {/* ── ZONE 4: Approval card — shrink-0, above bottom strip ────── */}
-      {showApproval && (
-        <div className="shrink-0 px-4 pb-2 w-full max-w-md mx-auto animate-in slide-in-from-bottom-4 duration-300">
-          <ApprovalCard
-            {...MOCK_APPROVAL}
-            status="pending"
-            onApprove={handleApprove}
-            onReject={handleReject}
-            onDetails={() => onOpenTechnicalDrawer()}
-          />
-        </div>
-      )}
+      {/* ── ZONE 4 REMOVED — approval cards no longer block the center ── */}
+      {/* Approvals now surface via ApprovalTray (absolute right panel).   */}
 
-      {showPostDecision && (
-        <div className="shrink-0 px-4 pb-2 w-full max-w-md mx-auto animate-in fade-in duration-300">
-          <ApprovalCard
-            {...MOCK_APPROVAL}
-            status={approvalStatus}
-          />
-        </div>
-      )}
+      {/* ── ApprovalTray — absolute right-side panel, z-20 ──────────── */}
+      <ApprovalTray
+        isOpen={isTrayOpen && (showApproval || showPostDecision)}
+        onClose={() => setIsTrayOpen(false)}
+        approval={MOCK_APPROVAL}
+        status={approvalStatus}
+        onApprove={handleApprove}
+        onReject={handleReject}
+        onDetails={onOpenTechnicalDrawer}
+      />
 
       {/* ── ZONE 5: Bottom action strip — shrink-0 ──────────────────── */}
       <div className="shrink-0 px-4 pt-2 pb-5 bg-gradient-to-t from-zinc-950/80 via-zinc-950/40 to-transparent">
