@@ -43,9 +43,9 @@ const STATE_CONFIG: Record<VisualizerState, {
   barSpeed: string;
 }> = {
   idle: {
-    label: 'Idle',
-    orbColor: 'from-zinc-700 to-zinc-800',
-    glowColor: 'rgba(99,102,241,0.09)',
+    label: 'Ready',
+    orbColor: 'from-zinc-600/70 to-zinc-800',
+    glowColor: 'rgba(99,102,241,0.12)',
     ringColor: 'bg-zinc-700/30',
     barColor: 'bg-zinc-600',
     labelColor: 'text-zinc-500',
@@ -172,7 +172,17 @@ export function AuraVoiceVisualizer({
           />
         )}
 
-        {/* Soft glow backdrop */}
+        {/* Wide diffuse glow (second layer) */}
+        <div
+          className="absolute rounded-full blur-3xl transition-all duration-700 opacity-60"
+          style={{
+            width: '180%',
+            height: '180%',
+            background: cfg.glowColor,
+          }}
+        />
+
+        {/* Primary glow backdrop */}
         <div
           className="absolute rounded-full blur-xl transition-all duration-700"
           style={{
@@ -182,10 +192,26 @@ export function AuraVoiceVisualizer({
           }}
         />
 
+        {/* Premium outer border ring — always visible, varies by state */}
+        <div
+          className="absolute rounded-full border transition-all duration-700 pointer-events-none"
+          style={{
+            width: 'calc(100% + 12px)',
+            height: 'calc(100% + 12px)',
+            borderColor: isActive
+              ? cfg.glowColor.replace(/[\d.]+\)$/, '0.35)')
+              : 'rgba(99,102,241,0.08)',
+            boxShadow: isActive
+              ? `0 0 12px 2px ${cfg.glowColor.replace(/[\d.]+\)$/, '0.15)')}`
+              : 'none',
+          }}
+        />
+
         {/* ── Orb ─────────────────────────────────────────────────── */}
         <div
           className={cn(
-            'relative rounded-full flex items-center justify-center bg-gradient-to-br transition-all duration-700 shadow-lg',
+            'relative rounded-full flex items-center justify-center bg-gradient-to-br transition-all duration-700',
+            'shadow-[inset_0_1px_1px_rgba(255,255,255,0.07),inset_0_-1px_1px_rgba(0,0,0,0.4)]',
             sizes.orb,
             cfg.orbColor,
             isActive && 'animate-pulse',

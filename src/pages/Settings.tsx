@@ -19,6 +19,8 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronUp,
+  Bell,
+  Eye,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAppSettings } from '../hooks/useAppSettings';
@@ -324,7 +326,7 @@ export function Settings() {
           <p className="text-zinc-400 text-sm">Local configuration for AURA Command Center</p>
         </div>
         <span className="text-xs text-zinc-600 border border-zinc-800 px-2 py-1 rounded">
-          Phase 2B · localStorage
+          Phase 2E · local config
         </span>
       </div>
 
@@ -395,7 +397,7 @@ export function Settings() {
       <CollapsibleSection
         icon={<Mic className="w-5 h-5" />}
         title="Voice"
-        subtitle="All voice features are mock-only in Phase 2B"
+        subtitle="Voice input and output settings"
       >
         <Toggle
           label="Enable voice interface"
@@ -404,14 +406,14 @@ export function Settings() {
         />
         <Toggle
           label="Wake word detection"
-          description='Listen for "Hey AURA" (mock — no real microphone access)'
+          description='Listen for "Hey AURA" (requires microphone permission)'
           checked={settings.wakeWordEnabled}
           onChange={wakeWordEnabled => handleUpdate({ wakeWordEnabled })}
           disabled={!settings.voiceEnabled}
         />
         <Toggle
           label="Text-to-speech responses"
-          description="Read assistant replies aloud (mock)"
+          description="Read assistant replies aloud via local speech synthesis"
           checked={settings.textToSpeechEnabled}
           onChange={textToSpeechEnabled => handleUpdate({ textToSpeechEnabled })}
           disabled={!settings.voiceEnabled}
@@ -507,9 +509,8 @@ export function Settings() {
           ))}
         </div>
         <div className="mt-2 p-3 bg-amber-500/5 border border-amber-500/20 rounded-lg text-xs text-amber-400/80">
-          <strong>Phase 2B note:</strong> Provider toggles are persisted locally. Real API key
-          configuration requires Phase 3 secure-storage integration (Tauri Keyring / OS credential store).
-          Key values are never written to localStorage.
+          Provider toggles are saved locally. API keys require secure storage configuration.
+          Key values are never written to local storage.
         </div>
       </CollapsibleSection>
 
@@ -517,7 +518,7 @@ export function Settings() {
       <CollapsibleSection
         icon={<BrainCircuit className="w-5 h-5" />}
         title="Memory"
-        subtitle="Local persistence placeholder — full vector memory in a later phase"
+        subtitle="Conversation and context memory retention"
       >
         <NumberField
           label="Memory retention (days)"
@@ -532,12 +533,75 @@ export function Settings() {
             className="flex items-center gap-2 px-3 py-2 text-sm text-rose-400 border border-rose-500/20 bg-rose-500/5 rounded-md hover:bg-rose-500/10 transition"
           >
             <Trash2 className="w-4 h-4" />
-            Clear mock memory entries
+            Clear memory entries
           </button>
           <p className="text-xs text-zinc-600 mt-1.5">
             Removes all locally persisted memory entries. Cannot be undone.
           </p>
         </div>
+      </CollapsibleSection>
+
+      {/* ── Startup & Safety Mode ── */}
+      <CollapsibleSection
+        icon={<Eye className="w-5 h-5" />}
+        title="Startup & Safety"
+        subtitle="Controls how AURA behaves when it first opens"
+        defaultOpen={false}
+      >
+        <Toggle
+          label="Safe Monitor Mode"
+          description="AURA observes but does not execute actions. All tool calls require explicit approval."
+          checked={settings.safeMonitorMode}
+          onChange={safeMonitorMode => handleUpdate({ safeMonitorMode })}
+        />
+        <div className="pt-1 text-xs text-zinc-600">
+          Safe Monitor can also be toggled from the Voice Core or Command Palette.
+        </div>
+      </CollapsibleSection>
+
+      {/* ── Notifications ── */}
+      <CollapsibleSection
+        icon={<Bell className="w-5 h-5" />}
+        title="Notifications"
+        subtitle="Control how AURA surfaces alerts and approvals"
+        defaultOpen={false}
+      >
+        <Toggle
+          label="Toast notifications"
+          description="Show brief notifications in the corner for events and approvals"
+          checked={settings.toastNotificationsEnabled}
+          onChange={toastNotificationsEnabled => handleUpdate({ toastNotificationsEnabled })}
+        />
+        <SelectField
+          label="Toast position"
+          value={settings.toastPosition}
+          options={[
+            { value: 'bottom-right', label: 'Bottom right' },
+            { value: 'top-right',    label: 'Top right'    },
+            { value: 'bottom-left',  label: 'Bottom left'  },
+            { value: 'top-left',     label: 'Top left'     },
+          ]}
+          onChange={toastPosition => handleUpdate({ toastPosition })}
+        />
+        <Toggle
+          label="Keep notification history"
+          description="Store recent notifications in the bell panel (in-memory, cleared on restart)"
+          checked={settings.notificationHistoryEnabled}
+          onChange={notificationHistoryEnabled => handleUpdate({ notificationHistoryEnabled })}
+        />
+        <Toggle
+          label="Notification sound"
+          description="Play a soft sound for high-priority notifications"
+          checked={settings.notificationSoundEnabled}
+          onChange={notificationSoundEnabled => handleUpdate({ notificationSoundEnabled })}
+          disabled
+        />
+        <Toggle
+          label="Show approvals as overlay"
+          description="Render approval requests directly on Voice Core, not just in notification center"
+          checked={settings.showApprovalsAsOverlay}
+          onChange={showApprovalsAsOverlay => handleUpdate({ showApprovalsAsOverlay })}
+        />
       </CollapsibleSection>
 
       {/* ── Provider Capability Audit ── */}
@@ -563,10 +627,9 @@ export function Settings() {
             <button
               disabled
               className="flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-zinc-500 bg-zinc-900 border border-zinc-800 rounded-md cursor-not-allowed"
-              title="File picker not yet implemented"
+              title="Import not yet available"
             >
               <Upload className="w-4 h-4" /> Import JSON
-              <span className="text-xs text-zinc-600">(Phase 3)</span>
             </button>
             <button
               onClick={handleReset}

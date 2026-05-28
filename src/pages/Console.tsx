@@ -1,20 +1,18 @@
 /**
  * Console — Phase 2E Voice Core
  *
- * Voice Core is now the default post-launch mode.
- * Chat console is an optional layer — opened from Voice Core or via mode toggle.
+ * AURA opens directly into Voice Core — no launch gate or initiation step.
+ * Voice Core is the immediate default experience.
  *
  * Modes:
- *   voiceCore    → AuraVoiceCore (default)
- *   chatConsole  → Legacy chat stream + composer
- *   adminPanel is an overlay on top of either mode, toggled from Voice Core
+ *   voiceCore    → AuraVoiceCore (default, shown immediately on load)
+ *   chatConsole  → Chat stream + composer (opened from Voice Core)
  */
 
 import React, { useState, useMemo, Fragment } from 'react';
 import { Settings2, ArrowLeft } from 'lucide-react';
 import { mockMessages } from '../store/mockData';
 
-import { AuraLaunchScreen }    from '../components/operator/AuraLaunchScreen';
 import { AuraVoiceCore }       from '../components/operator/AuraVoiceCore';
 import { AdminPanelOverlay }   from '../components/operator/AdminPanelOverlay';
 import { AuraComposer }        from '../components/operator/AuraComposer';
@@ -51,7 +49,7 @@ function toLegacyMessages(): AuraMessage[] {
           timestamp: msg.timestamp,
           agentId: msg.agentId,
           title: `Tool Request — ${tc.name}`,
-          summary: `${msg.agentId ?? 'Agent'} is requesting permission to run ${tc.name} with args: ${tc.args}`,
+          summary: `${msg.agentId ?? 'Agent'} requests permission to run ${tc.name}`,
           riskLevel: 'medium' as const,
           requestedAction: tc.name,
           sourceAgent: msg.agentId ?? 'Agent',
@@ -120,7 +118,7 @@ function toLegacyMessages(): AuraMessage[] {
 // ─── Console ──────────────────────────────────────────────────────────────────
 
 export function Console() {
-  const [hasInitiated,    setHasInitiated]    = useState(false);
+  // AURA opens directly into Voice Core — no initiation gate
   const [mode,            setMode]            = useState<ConsoleMode>('voiceCore');
   const [isDrawerOpen,    setIsDrawerOpen]    = useState(false);
   const [isRailCollapsed, setIsRailCollapsed] = useState(true);
@@ -129,12 +127,7 @@ export function Console() {
 
   const messages = useMemo(() => toLegacyMessages(), []);
 
-  // ── Launch screen (pre-initiation) ──────────────────────────────
-  if (!hasInitiated) {
-    return <AuraLaunchScreen onInitiate={() => setHasInitiated(true)} />;
-  }
-
-  // ── Voice Core mode (default) ────────────────────────────────────
+  // ── Voice Core mode (default, immediate) ────────────────────────
   if (mode === 'voiceCore') {
     return (
       <div className="flex h-full min-h-0 w-full overflow-hidden bg-zinc-950">
@@ -148,7 +141,7 @@ export function Console() {
           }}
         />
 
-        {/* Admin Panel Overlay (over Voice Core) */}
+        {/* Admin Panel Overlay */}
         <AdminPanelOverlay
           isOpen={isAdminOpen}
           onClose={() => setIsAdminOpen(false)}
@@ -158,37 +151,34 @@ export function Console() {
           }}
         />
 
-        {/* Technical Drawer (over everything) */}
+        {/* Technical Drawer */}
         <TechnicalDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
       </div>
     );
   }
 
-  // ── Chat Console mode (optional layer) ──────────────────────────
+  // ── Chat Console mode ────────────────────────────────────────────
   return (
     <div className="flex h-full min-h-0 w-full overflow-hidden bg-zinc-950/20">
 
-      {/* Center Console */}
+      {/* Center stream */}
       <div className="flex-1 flex flex-col min-w-0 h-full relative">
 
-        {/* Top Nav */}
+        {/* Top bar */}
         <div className="absolute top-0 left-0 right-0 h-14 bg-gradient-to-b from-zinc-950 via-zinc-950/85 to-transparent z-10 flex items-center justify-between px-6 pointer-events-none">
           <div className="flex items-center gap-3 pointer-events-auto">
-            {/* Return to Voice Core button */}
             <button
               onClick={() => setMode('voiceCore')}
               className={cn(
                 'flex items-center gap-2 px-3 py-1.5',
                 'bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/25',
-                'text-indigo-400 hover:text-indigo-300 rounded-lg text-[12px] font-medium',
-                'transition-colors',
+                'text-indigo-400 hover:text-indigo-300 rounded-lg text-[12px] font-medium transition-colors',
               )}
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               Voice Core
             </button>
 
-            {/* Presence dot */}
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 flex items-center justify-center">
                 <AuraPresenceDot state={auraState} />
@@ -197,7 +187,7 @@ export function Console() {
                 <span className="text-[13px] font-semibold tracking-wide text-zinc-200">AURA</span>
                 <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Console Mode
+                  Console
                 </span>
               </div>
             </div>
@@ -209,23 +199,21 @@ export function Console() {
               className={cn(
                 'flex items-center gap-2 px-3 py-1.5',
                 'bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800/80',
-                'text-zinc-400 hover:text-zinc-200 rounded-lg text-[13px] font-medium',
-                'transition backdrop-blur-md',
+                'text-zinc-400 hover:text-zinc-200 rounded-lg text-[13px] font-medium transition backdrop-blur-md',
               )}
             >
-              Admin Panel
+              Admin
             </button>
             <button
               onClick={() => setIsDrawerOpen(true)}
               className={cn(
                 'flex items-center gap-2 px-3 py-1.5',
                 'bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800/80',
-                'text-zinc-400 hover:text-zinc-200 rounded-lg text-[13px] font-medium',
-                'transition backdrop-blur-md',
+                'text-zinc-400 hover:text-zinc-200 rounded-lg text-[13px] font-medium transition backdrop-blur-md',
               )}
             >
               <Settings2 className="w-4 h-4" />
-              Technical Details
+              Details
             </button>
           </div>
         </div>
@@ -233,7 +221,7 @@ export function Console() {
         {/* Message stream */}
         <div className="flex-1 overflow-y-auto custom-scrollbar pt-20 pb-4">
           <div className="max-w-4xl mx-auto w-full px-4 flex flex-col gap-4">
-            <SessionDivider label="Session Started" />
+            <SessionDivider label="Session" />
             {messages.map(msg => (
               <Fragment key={msg.id}>
                 <AssistantMessage msg={msg} />
@@ -243,7 +231,7 @@ export function Console() {
           </div>
         </div>
 
-        {/* Pinned Composer */}
+        {/* Composer */}
         <div className="shrink-0 pt-2 pb-6 px-4 bg-gradient-to-t from-zinc-950 via-zinc-950 to-transparent">
           <div className="max-w-4xl mx-auto w-full">
             <AuraComposer />
@@ -251,7 +239,7 @@ export function Console() {
         </div>
       </div>
 
-      {/* Collapsible Right Rail */}
+      {/* Right Rail */}
       <OperatorRail
         isCollapsed={isRailCollapsed}
         onToggle={() => setIsRailCollapsed(prev => !prev)}

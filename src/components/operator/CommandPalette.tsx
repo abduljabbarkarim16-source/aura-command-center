@@ -10,7 +10,7 @@ import {
   Search, Terminal, ArrowRight, X, Workflow, Settings,
   LayoutDashboard, FolderKanban, BrainCircuit, BringToFront,
   Bot, Mic, ShieldCheck, Network, MemoryStick, ChevronRight,
-  Activity, Link2
+  Activity, Link2, Eye, Bell,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -47,10 +47,12 @@ const ALL_COMMANDS: Command[] = [
   { id: 'act-technical',  group: 'Actions',   icon: <Settings className="w-4 h-4 text-zinc-400" />,       title: 'Toggle technical details', description: 'Open/close the technical drawer'  },
 
   // System
-  { id: 'sys-voice',      group: 'System',    icon: <Mic className="w-4 h-4 text-rose-400" />,            title: 'Start voice mode',       description: 'Activate voice composer (placeholder)' },
-  { id: 'sys-agent',      group: 'System',    icon: <Bot className="w-4 h-4 text-blue-400" />,            title: 'Switch active agent',    description: 'Change the primary agent for this session' },
-  { id: 'sys-status',     group: 'System',    icon: <Activity className="w-4 h-4 text-emerald-400" />,    title: 'Provider capability audit', description: 'Review connected provider status'   },
-  { id: 'sys-dispatcher', group: 'System',    icon: <Network className="w-4 h-4 text-zinc-500" />,        title: 'Show Dispatcher preview', description: 'Autonomous multi-agent mode (planned)'  },
+  { id: 'sys-voice',      group: 'System',    icon: <Mic      className="w-4 h-4 text-rose-400" />,        title: 'Start voice mode',           description: 'Activate voice input'                      },
+  { id: 'sys-agent',      group: 'System',    icon: <Bot      className="w-4 h-4 text-blue-400" />,        title: 'Switch active agent',        description: 'Change the primary agent for this session'  },
+  { id: 'sys-status',     group: 'System',    icon: <Activity className="w-4 h-4 text-emerald-400" />,    title: 'Provider status',            description: 'Review connected provider status'           },
+  { id: 'sys-safe-mode',  group: 'System',    icon: <Eye      className="w-4 h-4 text-amber-400" />,       title: 'Toggle safe monitor mode',   description: 'AURA observes without executing actions'    },
+  { id: 'sys-notifs',     group: 'System',    icon: <Bell     className="w-4 h-4 text-indigo-400" />,      title: 'Open notifications',         description: 'View recent alerts and approvals'          },
+  { id: 'sys-dispatcher', group: 'System',    icon: <Network  className="w-4 h-4 text-zinc-500" />,        title: 'Dispatcher Mode',            description: 'Autonomous multi-agent mode — planned'      },
 ];
 
 // ─── CommandPalette ───────────────────────────────────────────────────────────

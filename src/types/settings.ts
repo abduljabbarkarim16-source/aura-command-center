@@ -73,6 +73,16 @@ export interface AppSettings {
   localWorkspaceRoot: string;
   /** Placeholder — path to user-managed MCP config file */
   mcpConfigPath: string;
+
+  // Startup / safety mode
+  safeMonitorMode: boolean;
+
+  // Notification preferences
+  toastNotificationsEnabled: boolean;
+  toastPosition: 'top-right' | 'bottom-right' | 'top-left' | 'bottom-left';
+  notificationHistoryEnabled: boolean;
+  notificationSoundEnabled: boolean;
+  showApprovalsAsOverlay: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +117,14 @@ export const DEFAULT_APP_SETTINGS: Readonly<AppSettings> = {
   desktopNotificationsEnabled: false,
   localWorkspaceRoot: '',
   mcpConfigPath: '',
+
+  safeMonitorMode: false,
+
+  toastNotificationsEnabled: true,
+  toastPosition: 'bottom-right',
+  notificationHistoryEnabled: true,
+  notificationSoundEnabled: false,
+  showApprovalsAsOverlay: true,
 };
 
 export const DEFAULT_PROVIDERS: Readonly<ProviderConfig[]> = [
