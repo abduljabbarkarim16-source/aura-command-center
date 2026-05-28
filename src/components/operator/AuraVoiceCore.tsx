@@ -2,14 +2,15 @@
  * AuraVoiceCore — Phase 2E Voice Core
  *
  * Direct default screen — no initiation gate.
- * Startup greeting fires on mount (thought card + optional local TTS).
- * Notification bell in Zone 1.
- * Safe Monitor Mode is a compact toggle, not a launch button.
+ * Startup greeting fires ONCE per browser session (sessionStorage guard).
+ * TTS is disabled by default; enabled only if settings.textToSpeechEnabled.
+ * Notification toasts appear top-right to avoid overlapping the visualizer.
+ * Zone 3 center is reserved for the audio-reactive visualizer — no thought cards.
  *
  * Layout: 5 explicit flex zones.
  *  Zone 1 — absolute status strip (no flex height)
  *  Zone 2 — mission card (shrink-0)
- *  Zone 3 — orb + thoughts + admin indicator (flex-1)
+ *  Zone 3 — orb + admin indicator (flex-1, center reserved for visualizer)
  *  Zone 4 — approval card (shrink-0)
  *  Zone 5 — bottom action strip (shrink-0)
  */
@@ -22,11 +23,15 @@ import {
 import { cn } from '../../lib/utils';
 import { AuraVoiceVisualizer, type VisualizerState } from './AuraVoiceVisualizer';
 import { AdminVoiceIndicator, type AdminVoiceState } from './AdminVoiceIndicator';
-import { AuraThoughtStack } from './AuraThoughtCard';
 import { ApprovalCard, type ApprovalCardProps } from './ApprovalCard';
 import { NotificationCenter } from './NotificationCenter';
 import { NotificationToast } from './NotificationToast';
 import { notificationService } from '../../services/notifications/NotificationService';
+
+// ─── Session guard key ────────────────────────────────────────────────────────
+
+/** Prevents the startup greeting from repeating on re-mount or hot reload. */
+const GREETING_SESSION_KEY = 'aura_greeting_shown';
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
 
@@ -38,10 +43,10 @@ const MOCK_MISSION = {
 };
 
 const MOCK_STATUS_CHIPS = [
-  { id: 'memory', icon: <Database className="w-3 h-3" />, label: 'Memory', value: 'Active',       color: 'text-emerald-400' },
-  { id: 'relay',  icon: <Wrench   className="w-3 h-3" />, label: 'Relay',  value: 'Ready',        color: 'text-amber-400'   },
-  { id: 'tools',  icon: <Shield   className="w-3 h-3" />, label: 'Tools',  value: 'Locked',       color: 'text-zinc-500'    },
-  { id: 'agent',  icon: <Bot      className="w-3 h-3" />, label: 'Agent',  value: 'Standing by',  color: 'text-indigo-400'  },
+  { id: 'memory', icon: <Database className="w-3 h-3" />, label: 'Memory', value: 'Active',      color: 'text-emerald-400' },
+  { id: 'relay',  icon: <Wrench   className="w-3 h-3" />, label: 'Relay',  value: 'Ready',       color: 'text-amber-400'  },
+  { id: 'tools',  icon: <Shield   className="w-3 h-3" />, label: 'Tools',  value: 'Locked',      color: 'text-zinc-500'   },
+  { id: 'agent',  icon: <Bot      className="w-3 h-3" />, label: 'Agent',  value: 'Standing by', color: 'text-indigo-400' },
 ];
 
 const MOCK_APPROVAL: ApprovalCardProps = {
@@ -95,50 +100,29 @@ export function AuraVoiceCore({
   const handleApprove   = () => { setApprovalStatus('approved'); setTimeout(() => setApprovalDismissed(true), 1200); };
   const handleReject    = () => { setApprovalStatus('rejected'); setTimeout(() => setApprovalDismissed(true), 1200); };
 
-  // ── Startup greeting ──────────────────────────────────────────────
+  // ── Startup greeting — fires once per browser session ─────────
   useEffect(() => {
-    // Greeting notification (auto-dismisses in 5s)
+    // sessionStorage persists for the tab lifetime; prevents repeated greetings
+    // on React re-mounts, Vite HMR, or navigation back to Voice Core.
+    if (sessionStorage.getItem(GREETING_SESSION_KEY)) return;
+    sessionStorage.setItem(GREETING_SESSION_KEY, '1');
+
     notificationService.add({
-      type:    'success',
-      title:   "I'm here. Ready to assist.",
-      message: 'AURA is active.',
-      ttl:     5000,
+      type:  'success',
+      title: "I'm here. Ready to assist.",
+      ttl:   5000,
     });
 
-    // Seed contextual notifications so the bell has immediate content
-    setTimeout(() => {
-      notificationService.add({
-        type:    'relay',
-        title:   'Relay packet ready.',
-        message: 'Prepared for review.',
-        ttl:     10000,
-      });
-    }, 600);
-
-    setTimeout(() => {
-      notificationService.add({
-        type:      'approval',
-        title:     '1 approval waiting.',
-        message:   'Claude Architect — read_file',
-        riskLevel: 'medium',
-        actions: [
-          { label: 'Approve', variant: 'approve', onClick: handleApprove },
-          { label: 'Reject',  variant: 'reject',  onClick: handleReject  },
-        ],
-      });
-    }, 1200);
-
-    // Optional local TTS — no external API
-    try {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        const utt = new SpeechSynthesisUtterance("I'm here. Ready to assist.");
-        utt.volume = 0.5;
-        utt.rate   = 0.9;
-        window.speechSynthesis.speak(utt);
-      }
-    } catch {
-      // speechSynthesis unavailable — silent fallback
-    }
+    // ── TTS: disabled by default in Phase 2E ──────────────────────────────
+    // Browser speechSynthesis is a fallback-quality option only.
+    // Do NOT enable by default — it degrades the experience on most systems.
+    //
+    // Future: read settings.textToSpeechEnabled && !settings.assistantMuted
+    // then choose the configured provider (OpenAI TTS, ElevenLabs, Windows TTS, etc.)
+    // See docs/aura-premium-ui-design-brief.md §15 for the Voice Output Quality Plan.
+    //
+    // const ttsEnabled = settings?.textToSpeechEnabled && !settings?.assistantMuted;
+    // if (ttsEnabled) { ... }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -148,8 +132,8 @@ export function AuraVoiceCore({
       'bg-gradient-to-b from-zinc-950 via-zinc-950 to-indigo-950/10',
     )}>
 
-      {/* ── Toast layer ──────────────────────────────────────────────── */}
-      <NotificationToast position="bottom-right" maxVisible={3} />
+      {/* ── Toast layer — top-right, does not overlap visualizer ─── */}
+      <NotificationToast position="top-right" maxVisible={3} />
 
       {/* ── ZONE 1: Absolute status strip ───────────────────────────── */}
       <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-5 py-2.5 pointer-events-none">
@@ -231,36 +215,19 @@ export function AuraVoiceCore({
         </div>
       </div>
 
-      {/* ── ZONE 3: Orb + thoughts + admin indicator — flex-1 ───────── */}
+      {/* ── ZONE 3: Orb + admin indicator — flex-1 ──────────────────── */}
+      {/* Center reserved exclusively for the audio-reactive visualizer.  */}
+      {/* Thought cards are not auto-displayed here; they surface via     */}
+      {/* the NotificationCenter or event-driven AuraThoughtStack calls.  */}
       <div className="flex-1 min-h-0 flex items-center justify-center px-4 py-2">
-        <div className="relative flex items-center justify-center w-full max-w-2xl">
-
-          {/* Left thought cards — starts at index 0 */}
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-48 hidden lg:block">
-            <AuraThoughtStack maxVisible={2} initialIndex={0} />
-          </div>
-
-          {/* Central orb + admin indicator */}
-          <div className="flex flex-col items-center gap-3 z-10">
-            <AuraVoiceVisualizer
-              state={effectiveAuraState}
-              size="xl"
-              showLabel
-              amplitude={isListening ? 0.8 : 0.3}
-            />
-            <AdminVoiceIndicator state={adminState} />
-          </div>
-
-          {/* Right thought cards — starts at index 4 */}
-          <div className="absolute right-0 top-1/2 -translate-y-1/2 w-48 hidden lg:block">
-            <AuraThoughtStack maxVisible={2} initialIndex={4} />
-          </div>
+        <div className="flex flex-col items-center gap-3 z-10">
+          <AuraVoiceVisualizer
+            state={effectiveAuraState}
+            size="xl"
+            showLabel
+          />
+          <AdminVoiceIndicator state={adminState} />
         </div>
-      </div>
-
-      {/* Mobile thought cards */}
-      <div className="shrink-0 w-full max-w-xs mx-auto px-4 pb-2 lg:hidden">
-        <AuraThoughtStack maxVisible={2} initialIndex={0} />
       </div>
 
       {/* ── ZONE 4: Approval card — shrink-0, above bottom strip ────── */}

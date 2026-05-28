@@ -498,4 +498,118 @@ The sidebar and right rail remain available — collapsed by default to give Voi
 
 ---
 
-*End of design brief — Phase 2E (including Voice Core correction)*
+---
+
+## 15. Voice Output Quality Plan
+
+**Applies to:** `phase-2e-aura-operator-ux-redesign` and beyond  
+**Status:** Architecture documented; no real audio APIs connected in Phase 2E.
+
+---
+
+### 15.1 Browser speechSynthesis — Fallback Only
+
+`window.speechSynthesis` (Web Speech API) is available in all Chromium-based WebViews
+including Tauri's WebView2 on Windows. It is used as a **last-resort fallback only** —
+not as AURA's intended voice quality target.
+
+**Limitations:**
+- Robotic, inconsistent voice quality across OS and browser versions
+- No streaming: full utterance must be constructed before playback
+- No amplitude data: cannot drive the visualizer from TTS audio
+- No control over prosody, emotion, or style
+- Windows voices are significantly worse than macOS voices
+
+**Phase 2E decision:** TTS is **disabled by default** (`textToSpeechEnabled: false`).
+The visual text greeting is shown regardless. Users may enable browser TTS in Settings
+as a convenience option, not a feature commitment.
+
+---
+
+### 15.2 TTS Provider Roadmap
+
+| Provider | Quality | Latency | Cost | Status |
+|---|---|---|---|---|
+| Browser speechSynthesis | ⭐ (fallback) | ~0ms | free | Wired, off by default |
+| Windows native TTS (SAPI) | ⭐⭐ | ~100ms | free | Planned — Tauri command |
+| OpenAI TTS (tts-1 / tts-1-hd) | ⭐⭐⭐⭐ | ~300ms | paid | Planned — Phase 3 |
+| ElevenLabs | ⭐⭐⭐⭐⭐ | ~400ms | paid | Planned — Phase 3 |
+| OpenAI Realtime API | ⭐⭐⭐⭐⭐ | <200ms | paid | Concept — future phase |
+| Local TTS (Coqui / Piper) | ⭐⭐⭐ | ~200ms | free | Concept — future phase |
+
+---
+
+### 15.3 STT Provider Roadmap
+
+| Provider | Quality | Latency | Cost | Status |
+|---|---|---|---|---|
+| Browser SpeechRecognition | ⭐⭐ | ~200ms | free | Not yet wired |
+| OpenAI Whisper (batch) | ⭐⭐⭐⭐⭐ | ~1–2s | paid | Planned — Phase 3 |
+| OpenAI Realtime STT | ⭐⭐⭐⭐⭐ | <300ms | paid | Concept — future phase |
+| Local Whisper.cpp (GGML) | ⭐⭐⭐⭐ | ~500ms | free | Concept — future phase |
+
+---
+
+### 15.4 Future STT → LLM → TTS → Visualizer Pipeline
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                  Future Full Voice Pipeline                         │
+│                                                                    │
+│  [Microphone]                                                      │
+│       │                                                            │
+│       ▼                                                            │
+│  [STT Engine]  ──→  transcript text                                │
+│  (Whisper / OpenAI / browser SpeechRecognition)                    │
+│       │                                                            │
+│       ▼                                                            │
+│  [LLM — Claude / GPT-4o]  ──→  response text                      │
+│       │                                                            │
+│       ▼                                                            │
+│  [TTS Engine]  ──→  PCM audio stream                              │
+│  (OpenAI TTS / ElevenLabs / Windows / Coqui)                      │
+│       │                                                            │
+│       ├──→  [AudioContext + AnalyserNode]                          │
+│       │          │                                                 │
+│       │          ▼                                                 │
+│       │    getByteFrequencyData()  ──→  [AuraVoiceVisualizer]      │
+│       │    (drives spectrum ring + energy rings in real time)      │
+│       │                                                            │
+│       └──→  [Audio output device]                                  │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**Web Audio API hookup points (already stubbed in code):**
+
+- `useMockAudioReactivity.ts` — contains inline comments showing exactly where to
+  replace mock data with `analyser.getByteFrequencyData()`. No interface changes needed.
+- `AuraVoiceVisualizer.tsx` — accepts `frequencyBands?: number[]` prop as external override.
+  Wire the AnalyserNode data array here; the visualizer requires no other changes.
+
+**Microphone permission:** `navigator.mediaDevices.getUserMedia({ audio: true })` requires
+explicit OS-level permission on Windows (Tauri manifest) and user approval via browser
+permission prompt. Do NOT request microphone access until the full STT pipeline is wired
+and the user has been informed. Phase 2E has NO microphone permission requests.
+
+---
+
+### 15.5 Voice Provider Settings Integration (Phase 3 Target)
+
+Settings fields to add in Phase 3:
+
+```ts
+// In AppSettings:
+voiceProvider:      'browser' | 'openai' | 'elevenlabs' | 'windows' | 'local';
+sttProvider:        'browser' | 'openai-whisper' | 'openai-realtime' | 'local';
+realtimeVoiceMode:  boolean;  // full-duplex WebRTC channel
+voicePersonality:   string;   // voice name / model variant
+voiceSpeed:         number;   // 0.5–2.0
+```
+
+These are planned but not yet added to avoid premature schema complexity.
+Phase 3 will introduce a dedicated Voice Settings section alongside the existing
+Provider Capability card.
+
+---
+
+*End of design brief — Phase 2E (including Voice Core correction and Voice Output Quality Plan)*

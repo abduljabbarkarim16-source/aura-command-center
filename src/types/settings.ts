@@ -121,7 +121,7 @@ export const DEFAULT_APP_SETTINGS: Readonly<AppSettings> = {
   safeMonitorMode: false,
 
   toastNotificationsEnabled: true,
-  toastPosition: 'bottom-right',
+  toastPosition: 'top-right',
   notificationHistoryEnabled: true,
   notificationSoundEnabled: false,
   showApprovalsAsOverlay: true,

@@ -119,7 +119,7 @@ export interface NotificationToastProps {
 
 export function NotificationToast({
   maxVisible = 4,
-  position = 'bottom-right',
+  position = 'top-right',
 }: NotificationToastProps) {
   const [notifications, setNotifications] = useState<AuraNotification[]>([]);
 

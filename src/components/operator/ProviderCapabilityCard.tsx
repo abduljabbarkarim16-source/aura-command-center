@@ -12,7 +12,7 @@
 import React, { Fragment } from 'react';
 import {
   CheckCircle2, XCircle, Lock, Network, BrainCircuit,
-  Sparkles, Bot, Orbit, MessageSquare
+  Sparkles, Bot, Orbit, MessageSquare, Volume2, Mic2, Radio,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -71,6 +71,32 @@ const PROVIDERS: ProviderDef[] = [
     envKey: null,
     tier: 'concept',
     note: 'Deep reasoning synthesis agent — planned',
+  },
+
+  // ── Voice providers — planned for Phase 3 ────────────────────────────────
+  {
+    id: 'voice-tts',
+    name: 'Voice TTS Provider',
+    icon: <Volume2 className="w-4 h-4 text-zinc-500" />,
+    envKey: null,
+    tier: 'planned',
+    note: 'OpenAI TTS · ElevenLabs · Windows native — not configured',
+  },
+  {
+    id: 'voice-stt',
+    name: 'Voice STT Provider',
+    icon: <Mic2 className="w-4 h-4 text-zinc-500" />,
+    envKey: null,
+    tier: 'planned',
+    note: 'OpenAI Whisper · browser SpeechRecognition — not configured',
+  },
+  {
+    id: 'voice-realtime',
+    name: 'Realtime Voice Channel',
+    icon: <Radio className="w-4 h-4 text-zinc-500" />,
+    envKey: null,
+    tier: 'concept',
+    note: 'OpenAI Realtime API · WebRTC — future phase',
   },
 ];
 

@@ -125,41 +125,52 @@ interface AuraThoughtStackProps {
   maxVisible?: number;
   /** Which MOCK_THOUGHTS index to start from (wraps). Default 0. */
   initialIndex?: number;
+  /**
+   * When true, seeds an initial card and rotates automatically every 3 s.
+   * When false (default), the stack is empty and still — suitable for idle/ambient use.
+   * Pass active={true} only when there is a real event stream to reflect.
+   */
+  active?: boolean;
   className?: string;
 }
 
-export function AuraThoughtStack({ maxVisible = 3, initialIndex = 0, className }: AuraThoughtStackProps) {
-  const [active, setActive] = useState<Thought[]>([]);
+export function AuraThoughtStack({ maxVisible = 3, initialIndex = 0, active = false, className }: AuraThoughtStackProps) {
+  const [cards, setCards] = useState<Thought[]>([]);
   const indexRef = useRef(initialIndex);
 
-  // Seed first thought from initialIndex
+  // Seed first thought — only when active
   useEffect(() => {
+    if (!active) {
+      setCards([]);
+      return;
+    }
     const first = MOCK_THOUGHTS[initialIndex % MOCK_THOUGHTS.length];
-    setActive([{ ...first, id: `${first.id}-${Date.now()}` }]);
+    setCards([{ ...first, id: `${first.id}-${Date.now()}` }]);
     indexRef.current = initialIndex + 1;
-  }, [initialIndex]);
+  }, [initialIndex, active]);
 
-  // Rotate thoughts
+  // Rotate thoughts — only when active
   useEffect(() => {
+    if (!active) return;
     const interval = setInterval(() => {
       const thought = MOCK_THOUGHTS[indexRef.current % MOCK_THOUGHTS.length];
       const unique: Thought = { ...thought, id: `${thought.id}-${Date.now()}` };
       indexRef.current++;
-      setActive(prev => {
+      setCards(prev => {
         const updated = [...prev, unique];
         return updated.slice(-maxVisible);
       });
     }, 3000);
     return () => clearInterval(interval);
-  }, [maxVisible]);
+  }, [maxVisible, active]);
 
   const handleDismiss = (id: string) => {
-    setActive(prev => prev.filter(t => t.id !== id));
+    setCards(prev => prev.filter(t => t.id !== id));
   };
 
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
-      {active.map(thought => (
+      {cards.map(thought => (
         <Fragment key={thought.id}>
           <AuraThoughtCard
             thought={thought}

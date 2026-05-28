@@ -1,15 +1,28 @@
 /**
- * AuraVoiceVisualizer — Phase 2E Deep Refinement
+ * AuraVoiceVisualizer — Phase 2E Audio-Reactive Rebuild
  *
- * Premium orb + waveform visualizer for the AURA assistant presence.
- * Pure CSS animations — no Web Audio API, no microphone access.
- * Accepts mock amplitude (0–1) for future real audio hookup.
+ * Multi-layer audio-reactive visualizer:
+ *   Layer 1 — Diffuse glow  (opacity scales with energyLevel)
+ *   Layer 2 — SVG spectrum ring  (radial bars driven by frequencyBands)
+ *   Layer 3 — Energy pulse rings  (only rendered when energyLevel > threshold)
+ *   Layer 4 — Outer border ring  (glow intensity scales with energyLevel)
+ *   Layer 5 — Orb  (state-colored gradient, glass highlight)
+ *             ↳ Inner elements: waveform bars / spinner / dot / mark
+ *
+ * Idle state: perfectly calm — only the gentle idle-breathe keyframe, no fake activity.
+ * All motion is data-driven from useMockAudioReactivity (or external frequencyBands).
+ *
+ * New props:
+ *   frequencyBands — per-band magnitudes (0–1). Omit to use internal mock.
+ *   mode           — visual character: 'ambient'|'voice'|'music'|'agent'
+ *   source         — speaker accent: 'aura'|'admin'|'system'
  */
 
 import React from 'react';
 import { cn } from '../../lib/utils';
+import { useMockAudioReactivity } from '../../hooks/useMockAudioReactivity';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export type VisualizerState =
   | 'idle'
@@ -22,9 +35,28 @@ export type VisualizerState =
 
 export interface AuraVoiceVisualizerProps {
   state?: VisualizerState;
-  /** Mock amplitude 0–1. Real audio value can be wired here later. */
+  /**
+   * Normalized per-band frequency magnitudes (0–1), length 8–64.
+   * When omitted, internal useMockAudioReactivity drives the visualizer.
+   *
+   * FUTURE: pass analyser.getByteFrequencyData() values here.
+   */
+  frequencyBands?: number[];
+  /**
+   * Overall amplitude 0–1. Overrides internal mock envelope when provided.
+   */
   amplitude?: number;
-  /** Size variant */
+  /**
+   * Visual mode — controls energy character and bar density.
+   * 'ambient': softer, sparser  |  'voice': standard  |  'music': denser, louder  |  'agent': structured
+   * Full per-mode differentiation planned for Phase 3.
+   */
+  mode?: 'ambient' | 'voice' | 'music' | 'agent';
+  /**
+   * Source accent — changes SVG bar color to identify who is speaking.
+   * 'aura' (default): state color  |  'admin': amber  |  'system': zinc
+   */
+  source?: 'aura' | 'admin' | 'system';
   size?: 'sm' | 'md' | 'lg' | 'xl';
   showLabel?: boolean;
   className?: string;
@@ -32,262 +64,357 @@ export interface AuraVoiceVisualizerProps {
 
 // ─── State configuration ──────────────────────────────────────────────────────
 
-const STATE_CONFIG: Record<VisualizerState, {
-  label: string;
-  orbColor: string;
-  glowColor: string;
-  ringColor: string;
-  barColor: string;
-  labelColor: string;
-  ringSpeed: string;
-  barSpeed: string;
-}> = {
+interface StateConfig {
+  label:      string;
+  orbColor:   string;   // Tailwind gradient classes
+  glowColor:  string;   // CSS rgba string for backdrop glow
+  ringColor:  string;   // Tailwind class for ping rings
+  barColor:   string;   // Tailwind class for inner waveform bars
+  svgColor:   string;   // CSS rgba string for SVG spectrum lines
+  labelColor: string;   // Tailwind class for state label
+}
+
+const STATE_CONFIG: Record<VisualizerState, StateConfig> = {
   idle: {
-    label: 'Ready',
-    orbColor: 'from-zinc-600/70 to-zinc-800',
-    glowColor: 'rgba(99,102,241,0.12)',
-    ringColor: 'bg-zinc-700/30',
-    barColor: 'bg-zinc-600',
-    labelColor: 'text-zinc-500',
-    ringSpeed: 'animation-duration-[4s]',
-    barSpeed: 'animation-duration-[2s]',
+    label:      'Ready',
+    orbColor:   'from-zinc-600/70 to-zinc-800',
+    glowColor:  'rgba(99,102,241,0.10)',
+    ringColor:  'bg-zinc-700/20',
+    barColor:   'bg-zinc-400',
+    svgColor:   'rgba(113,113,122,0.55)',
+    labelColor: 'text-zinc-600',
   },
   listening: {
-    label: 'Listening',
-    orbColor: 'from-indigo-500 to-blue-600',
-    glowColor: 'rgba(99,102,241,0.35)',
-    ringColor: 'bg-indigo-500/25',
-    barColor: 'bg-indigo-400',
+    label:      'Listening',
+    orbColor:   'from-indigo-500 to-blue-600',
+    glowColor:  'rgba(99,102,241,0.40)',
+    ringColor:  'bg-indigo-500/20',
+    barColor:   'bg-indigo-200',
+    svgColor:   'rgba(99,102,241,0.82)',
     labelColor: 'text-indigo-400',
-    ringSpeed: 'animation-duration-[1.5s]',
-    barSpeed: 'animation-duration-[0.6s]',
   },
   thinking: {
-    label: 'Thinking',
-    orbColor: 'from-violet-500 to-purple-700',
-    glowColor: 'rgba(139,92,246,0.35)',
-    ringColor: 'bg-violet-500/25',
-    barColor: 'bg-violet-400',
+    label:      'Thinking',
+    orbColor:   'from-violet-500 to-purple-700',
+    glowColor:  'rgba(139,92,246,0.36)',
+    ringColor:  'bg-violet-500/20',
+    barColor:   'bg-violet-200',
+    svgColor:   'rgba(139,92,246,0.78)',
     labelColor: 'text-violet-400',
-    ringSpeed: 'animation-duration-[2s]',
-    barSpeed: 'animation-duration-[1.2s]',
   },
   speaking: {
-    label: 'Speaking',
-    orbColor: 'from-emerald-500 to-teal-600',
-    glowColor: 'rgba(16,185,129,0.35)',
-    ringColor: 'bg-emerald-500/25',
-    barColor: 'bg-emerald-400',
+    label:      'Speaking',
+    orbColor:   'from-emerald-500 to-teal-600',
+    glowColor:  'rgba(16,185,129,0.40)',
+    ringColor:  'bg-emerald-500/20',
+    barColor:   'bg-emerald-200',
+    svgColor:   'rgba(16,185,129,0.82)',
     labelColor: 'text-emerald-400',
-    ringSpeed: 'animation-duration-[0.8s]',
-    barSpeed: 'animation-duration-[0.4s]',
   },
   waiting_for_approval: {
-    label: 'Waiting for approval',
-    orbColor: 'from-amber-500 to-orange-600',
-    glowColor: 'rgba(245,158,11,0.30)',
-    ringColor: 'bg-amber-500/25',
-    barColor: 'bg-amber-400',
+    label:      'Awaiting approval',
+    orbColor:   'from-amber-500 to-orange-600',
+    glowColor:  'rgba(245,158,11,0.30)',
+    ringColor:  'bg-amber-500/20',
+    barColor:   'bg-amber-200',
+    svgColor:   'rgba(245,158,11,0.72)',
     labelColor: 'text-amber-400',
-    ringSpeed: 'animation-duration-[2.5s]',
-    barSpeed: 'animation-duration-[1.8s]',
   },
   executing: {
-    label: 'Executing',
-    orbColor: 'from-orange-500 to-red-600',
-    glowColor: 'rgba(249,115,22,0.30)',
-    ringColor: 'bg-orange-500/25',
-    barColor: 'bg-orange-400',
+    label:      'Executing',
+    orbColor:   'from-orange-500 to-red-600',
+    glowColor:  'rgba(249,115,22,0.34)',
+    ringColor:  'bg-orange-500/20',
+    barColor:   'bg-orange-200',
+    svgColor:   'rgba(249,115,22,0.75)',
     labelColor: 'text-orange-400',
-    ringSpeed: 'animation-duration-[1s]',
-    barSpeed: 'animation-duration-[0.5s]',
   },
   error: {
-    label: 'Error',
-    orbColor: 'from-rose-500 to-red-700',
-    glowColor: 'rgba(244,63,94,0.35)',
-    ringColor: 'bg-rose-500/25',
-    barColor: 'bg-rose-400',
+    label:      'Error',
+    orbColor:   'from-rose-500 to-red-700',
+    glowColor:  'rgba(244,63,94,0.36)',
+    ringColor:  'bg-rose-500/20',
+    barColor:   'bg-rose-200',
+    svgColor:   'rgba(244,63,94,0.75)',
     labelColor: 'text-rose-400',
-    ringSpeed: 'animation-duration-[0.6s]',
-    barSpeed: 'animation-duration-[0.3s]',
   },
+};
+
+// Source → SVG color override (identifies who is speaking)
+const SOURCE_SVG_COLOR: Partial<Record<string, string>> = {
+  admin:  'rgba(245,158,11,0.80)',
+  system: 'rgba(113,113,122,0.58)',
 };
 
 // ─── Size configuration ───────────────────────────────────────────────────────
 
-const SIZE_CONFIG = {
-  sm: { orb: 'w-10 h-10', bars: 'h-6', barW: 'w-0.5', ring: 'w-14 h-14', ring2: 'w-20 h-20' },
-  md: { orb: 'w-16 h-16', bars: 'h-10', barW: 'w-0.5', ring: 'w-24 h-24', ring2: 'w-32 h-32' },
-  lg: { orb: 'w-24 h-24', bars: 'h-14', barW: 'w-1',   ring: 'w-36 h-36', ring2: 'w-48 h-48' },
-  xl: { orb: 'w-32 h-32', bars: 'h-20', barW: 'w-1',   ring: 'w-48 h-48', ring2: 'w-64 h-64' },
+interface SizeConfig {
+  orb:            string;  // Tailwind w/h classes (diameter)
+  orbPx:          number;  // orb radius in px (diameter ÷ 2)
+  spectrumSizePx: number;  // SVG container size (must fit orb + full bars)
+  maxBarPx:       number;  // max spectrum bar extension in px
+  spectrumGap:    number;  // gap (px) between orb edge and bar root
+  strokeW:        number;  // SVG strokeWidth
+  barW:           string;  // Tailwind class for inner waveform bar width
+}
+
+const SIZE_CONFIG: Record<string, SizeConfig> = {
+  sm: { orb: 'w-10 h-10',  orbPx: 20, spectrumSizePx: 100, maxBarPx: 18, spectrumGap:  8, strokeW: 1.5, barW: 'w-px'   },
+  md: { orb: 'w-16 h-16',  orbPx: 32, spectrumSizePx: 152, maxBarPx: 28, spectrumGap:  9, strokeW: 2.0, barW: 'w-0.5' },
+  lg: { orb: 'w-24 h-24',  orbPx: 48, spectrumSizePx: 218, maxBarPx: 40, spectrumGap: 10, strokeW: 2.0, barW: 'w-0.5' },
+  xl: { orb: 'w-32 h-32',  orbPx: 64, spectrumSizePx: 282, maxBarPx: 52, spectrumGap: 12, strokeW: 2.5, barW: 'w-1'   },
 };
 
-// ─── Waveform bars (7 bars, staggered animations) ─────────────────────────────
-
-const BAR_HEIGHTS = [0.4, 0.7, 0.9, 1.0, 0.9, 0.7, 0.4];
-const BAR_DELAYS  = [0, 80, 160, 240, 160, 80, 0]; // ms
-
-// ─── Component ───────────────────────────────────────────────────────────────
+// ─── AuraVoiceVisualizer ──────────────────────────────────────────────────────
 
 export function AuraVoiceVisualizer({
-  state = 'idle',
-  amplitude = 0.5,
-  size = 'md',
-  showLabel = true,
+  state          = 'idle',
+  frequencyBands: externalBands,
+  amplitude:      externalAmplitude,
+  mode           = 'voice',
+  source         = 'aura',
+  size           = 'md',
+  showLabel      = true,
   className,
 }: AuraVoiceVisualizerProps) {
+
+  // Internal audio-reactive data — always runs; values overridden when external props provided.
+  // Component re-renders at ~60fps only for itself; parent is unaffected.
+  const mock = useMockAudioReactivity(state);
+
+  const bands       = externalBands      ?? mock.frequencyBands;
+  const amplitude   = externalAmplitude  ?? mock.amplitude;
+  const energyLevel = mock.energyLevel;  // use internal envelope regardless of external bands
+
+  void amplitude; // acknowledged — available for future external override use
+
   const cfg   = STATE_CONFIG[state];
   const sizes = SIZE_CONFIG[size];
 
-  const isActive = state !== 'idle' && state !== 'error';
-  const effectiveAmplitude = Math.max(0.1, Math.min(1, amplitude));
+  // SVG bar color — source accent overrides state color when speaking as admin/system
+  const svgBarColor = SOURCE_SVG_COLOR[source] ?? cfg.svgColor;
+
+  // Mode → max bar height multiplier
+  const barMultiplier = mode === 'music' ? 1.25 : mode === 'ambient' ? 0.65 : 1.0;
+
+  // SVG geometry
+  const cx     = sizes.spectrumSizePx / 2;
+  const cy     = sizes.spectrumSizePx / 2;
+  const innerR = sizes.orbPx + sizes.spectrumGap;
+  const n      = bands.length || 1;
+
+  // Compute spectrum ring lines for this frame
+  const spectrumLines = bands.map((magnitude, i) => {
+    const angle  = (i / n) * 2 * Math.PI - Math.PI / 2; // start from 12-o'clock
+    const barLen = magnitude * sizes.maxBarPx * barMultiplier;
+    const cos    = Math.cos(angle);
+    const sin    = Math.sin(angle);
+    return {
+      x1: cx + innerR * cos,
+      y1: cy + innerR * sin,
+      x2: cx + (innerR + barLen) * cos,
+      y2: cy + (innerR + barLen) * sin,
+      magnitude,
+    };
+  });
+
+  // Inner waveform bars — only for speaking/listening, sampled from mid-freq bands
+  const innerBars: number[] = [];
+  if (state === 'speaking' || state === 'listening') {
+    const midStart = Math.floor(n * 0.12);
+    const midEnd   = Math.floor(n * 0.65);
+    const midSlice = bands.slice(midStart, midEnd);
+    const barCount = 7;
+    const step     = Math.max(1, midSlice.length / barCount);
+    const maxH     = sizes.orbPx * 0.60;
+    for (let i = 0; i < barCount; i++) {
+      const v = midSlice[Math.floor(i * step)] ?? 0;
+      innerBars.push(Math.max(2, Math.round(v * maxH)));
+    }
+  }
 
   return (
     <div className={cn('flex flex-col items-center gap-3', className)}>
-      {/* ── Orb + rings ─────────────────────────────────────────────── */}
-      <div className="relative flex items-center justify-center">
 
-        {/* Outer glow ring (slow) */}
-        {isActive && (
+      {/* ── Visualization container (sized to hold spectrum ring) ────── */}
+      <div
+        className="relative flex items-center justify-center"
+        style={{ width: sizes.spectrumSizePx, height: sizes.spectrumSizePx }}
+      >
+
+        {/* ── Layer 1: Diffuse backdrop glow ──────────────────────────── */}
+        <div
+          className="absolute inset-0 flex items-center justify-center pointer-events-none"
+          aria-hidden="true"
+        >
           <div
-            className={cn(
-              'absolute rounded-full opacity-0 animate-ping',
-              sizes.ring2,
-              cfg.ringColor
-            )}
-            style={{ animationDuration: '2.4s', animationDelay: '0.6s' }}
+            className="absolute rounded-full blur-3xl"
+            style={{
+              width:      '72%',
+              height:     '72%',
+              background: cfg.glowColor,
+              opacity:    0.07 + energyLevel * 0.55,
+              transition: 'opacity 0.7s ease, background 0.7s ease',
+            }}
           />
+          <div
+            className="absolute rounded-full blur-xl"
+            style={{
+              width:      '52%',
+              height:     '52%',
+              background: cfg.glowColor,
+              opacity:    0.10 + energyLevel * 0.45,
+              transition: 'opacity 0.5s ease',
+            }}
+          />
+        </div>
+
+        {/* ── Layer 2: SVG spectrum ring ───────────────────────────────── */}
+        {energyLevel > 0.015 && (
+          <svg
+            className="absolute inset-0 pointer-events-none"
+            width={sizes.spectrumSizePx}
+            height={sizes.spectrumSizePx}
+            viewBox={`0 0 ${sizes.spectrumSizePx} ${sizes.spectrumSizePx}`}
+            aria-hidden="true"
+          >
+            {spectrumLines.map(({ x1, y1, x2, y2, magnitude }, i) =>
+              magnitude > 0.01 ? (
+                <line
+                  key={i}
+                  x1={x1} y1={y1}
+                  x2={x2} y2={y2}
+                  stroke={svgBarColor}
+                  strokeWidth={sizes.strokeW}
+                  strokeLinecap="round"
+                  opacity={0.28 + magnitude * 0.72}
+                />
+              ) : null,
+            )}
+          </svg>
         )}
 
-        {/* Mid glow ring */}
-        {isActive && (
+        {/* ── Layer 3: Energy pulse rings (only when active) ──────────── */}
+        {energyLevel > 0.18 && (
           <div
-            className={cn(
-              'absolute rounded-full opacity-0 animate-ping',
-              sizes.ring,
-              cfg.ringColor
-            )}
-            style={{ animationDuration: '1.8s' }}
-          />
+            className="absolute inset-0 flex items-center justify-center pointer-events-none"
+            aria-hidden="true"
+          >
+            <div
+              className={cn('absolute rounded-full animate-ping', cfg.ringColor)}
+              style={{
+                width:             sizes.orbPx * 2 + 30,
+                height:            sizes.orbPx * 2 + 30,
+                opacity:           Math.min(0.50, energyLevel * 0.65),
+                animationDuration: `${Math.max(0.6, 2.8 - energyLevel * 1.8)}s`,
+              }}
+            />
+          </div>
+        )}
+        {energyLevel > 0.44 && (
+          <div
+            className="absolute inset-0 flex items-center justify-center pointer-events-none"
+            aria-hidden="true"
+          >
+            <div
+              className={cn('absolute rounded-full animate-ping', cfg.ringColor)}
+              style={{
+                width:             sizes.orbPx * 2 + 14,
+                height:            sizes.orbPx * 2 + 14,
+                opacity:           Math.min(0.38, energyLevel * 0.42),
+                animationDuration: `${Math.max(0.4, 1.8 - energyLevel * 1.0)}s`,
+                animationDelay:    '0.28s',
+              }}
+            />
+          </div>
         )}
 
-        {/* Wide diffuse glow (second layer) */}
+        {/* ── Layer 4: Outer border ring ───────────────────────────────── */}
         <div
-          className="absolute rounded-full blur-3xl transition-all duration-700 opacity-60"
+          className="absolute rounded-full border pointer-events-none"
           style={{
-            width: '180%',
-            height: '180%',
-            background: cfg.glowColor,
-          }}
-        />
-
-        {/* Primary glow backdrop */}
-        <div
-          className="absolute rounded-full blur-xl transition-all duration-700"
-          style={{
-            width: '140%',
-            height: '140%',
-            background: cfg.glowColor,
-          }}
-        />
-
-        {/* Premium outer border ring — always visible, varies by state */}
-        <div
-          className="absolute rounded-full border transition-all duration-700 pointer-events-none"
-          style={{
-            width: 'calc(100% + 12px)',
-            height: 'calc(100% + 12px)',
-            borderColor: isActive
-              ? cfg.glowColor.replace(/[\d.]+\)$/, '0.35)')
-              : 'rgba(99,102,241,0.08)',
-            boxShadow: isActive
-              ? `0 0 12px 2px ${cfg.glowColor.replace(/[\d.]+\)$/, '0.15)')}`
+            width:       sizes.orbPx * 2 + 10,
+            height:      sizes.orbPx * 2 + 10,
+            borderColor: energyLevel > 0.06
+              ? cfg.glowColor.replace(/[\d.]+\)$/, `${(0.18 + energyLevel * 0.38).toFixed(2)})`)
+              : 'rgba(99,102,241,0.07)',
+            boxShadow: energyLevel > 0.06
+              ? `0 0 ${(6 + energyLevel * 20).toFixed(0)}px ${(energyLevel * 3).toFixed(0)}px ${cfg.glowColor.replace(/[\d.]+\)$/, `${(energyLevel * 0.18).toFixed(2)})`)}`
               : 'none',
+            transition: 'border-color 0.6s ease, box-shadow 0.6s ease',
           }}
         />
 
-        {/* ── Orb ─────────────────────────────────────────────────── */}
+        {/* ── Layer 5: Orb ─────────────────────────────────────────────── */}
         <div
           className={cn(
-            'relative rounded-full flex items-center justify-center bg-gradient-to-br transition-all duration-700',
-            'shadow-[inset_0_1px_1px_rgba(255,255,255,0.07),inset_0_-1px_1px_rgba(0,0,0,0.4)]',
+            'relative z-10 rounded-full flex items-center justify-center',
+            'bg-gradient-to-br transition-colors duration-700',
+            // Glass inner highlight — inset shadow trick
+            'shadow-[inset_0_1px_1px_rgba(255,255,255,0.08),inset_0_-1px_2px_rgba(0,0,0,0.55)]',
             sizes.orb,
             cfg.orbColor,
-            isActive && 'animate-pulse',
           )}
-          style={
-            isActive
-              ? { animationDuration: state === 'speaking' ? '0.6s' : state === 'listening' ? '1s' : '2s' }
-              : state === 'idle'
-              ? {
-                  animationName: 'idle-breathe',
-                  animationDuration: '5s',
-                  animationTimingFunction: 'ease-in-out',
-                  animationIterationCount: 'infinite',
-                }
-              : undefined
-          }
+          style={state === 'idle' ? {
+            animationName:           'idle-breathe',
+            animationDuration:       '5s',
+            animationTimingFunction: 'ease-in-out',
+            animationIterationCount: 'infinite',
+          } : undefined}
         >
-          {/* Waveform bars inside orb (only in active states) */}
-          {(state === 'speaking' || state === 'listening') && (
-            <div className="flex items-center gap-0.5">
-              {BAR_HEIGHTS.map((baseH, i) => (
+
+          {/* Inner waveform — data-driven heights for listening/speaking */}
+          {innerBars.length > 0 && (
+            <div className="flex items-end gap-px">
+              {innerBars.map((h, i) => (
                 <div
                   key={i}
-                  className={cn('rounded-full opacity-80 transition-all', sizes.barW, cfg.barColor)}
-                  style={{
-                    height: `${Math.round(baseH * effectiveAmplitude * (size === 'sm' ? 16 : size === 'md' ? 24 : 36))}px`,
-                    animationName: 'bar-bounce',
-                    animationDuration: state === 'speaking' ? '0.5s' : '0.8s',
-                    animationDelay: `${BAR_DELAYS[i]}ms`,
-                    animationTimingFunction: 'ease-in-out',
-                    animationIterationCount: 'infinite',
-                    animationDirection: 'alternate',
-                  }}
+                  className={cn('rounded-full opacity-80', sizes.barW, cfg.barColor)}
+                  style={{ height: `${h}px` }}
                 />
               ))}
             </div>
           )}
 
-          {/* Thinking spinner ring */}
+          {/* Thinking spinner */}
           {state === 'thinking' && (
             <div
-              className="absolute inset-1 rounded-full border-2 border-transparent border-t-violet-300/70"
+              className="absolute inset-2 rounded-full border-2 border-transparent border-t-violet-300/70"
               style={{ animation: 'spin 1.5s linear infinite' }}
             />
           )}
 
-          {/* Executing spinner */}
+          {/* Executing dual-arc spinner */}
           {state === 'executing' && (
             <div
-              className="absolute inset-1 rounded-full border-2 border-transparent border-t-orange-300/70 border-r-orange-300/30"
-              style={{ animation: 'spin 0.8s linear infinite' }}
+              className="absolute inset-2 rounded-full border-2 border-transparent border-t-orange-300/70 border-r-orange-300/25"
+              style={{ animation: 'spin 0.75s linear infinite' }}
             />
           )}
 
-          {/* Error X marker */}
+          {/* Error mark */}
           {state === 'error' && (
-            <div className="text-white/80 font-bold text-lg select-none">✕</div>
+            <span className="text-white/80 font-bold text-lg select-none leading-none">✕</span>
           )}
 
-          {/* Idle dot */}
+          {/* Idle: small calm dot */}
           {state === 'idle' && (
-            <div className="w-2 h-2 rounded-full bg-zinc-500/80" />
+            <div className="w-1.5 h-1.5 rounded-full bg-zinc-400/50" />
           )}
 
-          {/* Waiting amber dot */}
+          {/* Waiting for approval: amber pulse dot */}
           {state === 'waiting_for_approval' && (
             <div className="w-3 h-3 rounded-full bg-amber-300/90 animate-pulse" />
           )}
         </div>
       </div>
 
-      {/* ── Label ───────────────────────────────────────────────────── */}
+      {/* ── State label ──────────────────────────────────────────────── */}
       {showLabel && (
         <span className={cn(
-          'text-[11px] font-semibold uppercase tracking-widest transition-colors duration-500',
-          cfg.labelColor
+          'text-[11px] font-semibold uppercase tracking-widest',
+          'transition-colors duration-500',
+          cfg.labelColor,
         )}>
           {cfg.label}
         </span>
@@ -296,28 +423,27 @@ export function AuraVoiceVisualizer({
   );
 }
 
-// ─── Inline style injection for keyframes ─────────────────────────────────────
+// ─── Keyframe injection ───────────────────────────────────────────────────────
+// One-time injection; id guard prevents duplicates across HMR cycles.
 
-// Injected once at module load; id guards against duplicate insertion.
-const auraKeyframesStyle =
+const _auraStyleEl =
   typeof document !== 'undefined' && !document.getElementById('aura-keyframes')
     ? Object.assign(document.createElement('style'), {
         id: 'aura-keyframes',
         textContent: [
-          `@keyframes bar-bounce { from { transform: scaleY(0.3); } to { transform: scaleY(1.2); } }`,
           `@keyframes idle-breathe {`,
-          `  0%, 100% { opacity: 0.72; transform: scale(1); }`,
-          `  50%       { opacity: 1;    transform: scale(1.035); }`,
+          `  0%, 100% { opacity: 0.70; transform: scale(1);     }`,
+          `  50%       { opacity: 1;    transform: scale(1.038); }`,
           `}`,
         ].join('\n'),
       })
     : null;
 
-if (auraKeyframesStyle && typeof document !== 'undefined') {
-  document.head.appendChild(auraKeyframesStyle);
+if (_auraStyleEl && typeof document !== 'undefined') {
+  document.head.appendChild(_auraStyleEl);
 }
 
-// ─── Compact inline orb (for top nav / status strip) ─────────────────────────
+// ─── AuraPresenceDot — compact inline status dot (top nav / status strip) ────
 
 export function AuraPresenceDot({
   state = 'idle',
@@ -333,7 +459,7 @@ export function AuraPresenceDot({
         className={cn(
           'w-3 h-3 rounded-full bg-gradient-to-br transition-all duration-700',
           cfg.orbColor,
-          state !== 'idle' && 'animate-pulse'
+          state !== 'idle' && 'animate-pulse',
         )}
       />
       {state !== 'idle' && state !== 'error' && (
