@@ -1,16 +1,15 @@
 /**
- * CommandProposalService — AURA Milestone D
+ * CommandProposalService — AURA Milestone D + Native Execution Bridge
  *
  * Manages the full lifecycle of proposed commands — from AURA drafting
- * a proposal through admin approval to execution status tracking.
+ * a proposal through admin approval to execution via the native bridge.
  *
  * Integration:
  * - Uses CommandPolicyService to classify every proposal before creating it
  * - Emits to NotificationService when a proposal needs approval
  * - Bridges to VoiceRuntimeService to surface approval tray for high-risk proposals
- *
- * No actual command execution happens here.
- * Execution support arrives in Milestone J (SelfBuildOrchestratorService).
+ * - Executes approved allowlisted commands via NativeCommandService
+ * - Records execution results to timeline via RuntimeTimelineService
  */
 
 import type {
@@ -23,6 +22,8 @@ import type {
 import { commandPolicyService } from './CommandPolicyService';
 import { notificationService } from '../notifications/NotificationService';
 import { voiceRuntimeService } from '../voice/VoiceRuntimeService';
+import { nativeCommandService } from '../native/NativeCommandService';
+import { runtimeTimeline } from '../runtime/RuntimeTimelineService';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -228,6 +229,116 @@ class CommandProposalService {
 
   getResult(id: string): CommandExecutionResult | null {
     return this.results.get(id) ?? null;
+  }
+
+  // ── Execution via Native Bridge ─────────────────────────────────────────
+
+  /**
+   * Execute an approved proposal through the Tauri native command bridge.
+   * Only runs commands that are approved/ready_to_run AND in the native allowlist.
+   */
+  async executeProposal(id: string): Promise<CommandExecutionResult | null> {
+    const proposal = this.getProposal(id);
+    if (!proposal) return null;
+
+    // Validate status — must be approved or ready_to_run
+    if (proposal.status !== 'approved' && proposal.status !== 'ready_to_run') {
+      this.addAudit(id, 'system', 'execution_rejected',
+        `Cannot execute: status is '${proposal.status}', expected 'approved' or 'ready_to_run'`);
+      return null;
+    }
+
+    // Check native bridge availability
+    if (!nativeCommandService.isNativeAvailable()) {
+      this.addAudit(id, 'system', 'execution_rejected',
+        'Native bridge unavailable — not running in Tauri desktop mode');
+      notificationService.add({
+        type: 'warning',
+        title: 'Cannot execute',
+        message: 'Native bridge not available. Run in Tauri desktop mode.',
+        ttl: 5000,
+      });
+      return null;
+    }
+
+    // Check allowlist
+    if (!nativeCommandService.isCommandAllowed(proposal.command, proposal.args)) {
+      this.addAudit(id, 'system', 'execution_rejected',
+        `Command not in native allowlist: ${proposal.command}`);
+      notificationService.add({
+        type: 'danger',
+        title: 'Execution blocked',
+        message: `"${proposal.command}" is not in the native execution allowlist`,
+        ttl: 5000,
+      });
+      return null;
+    }
+
+    // Mark as running
+    this.markRunning(id);
+    voiceRuntimeService.emit('tool_running', {
+      toolName: proposal.command,
+      proposalId: id,
+    });
+
+    // Execute through native bridge
+    const nativeResult = await nativeCommandService.runAllowedCommand(
+      proposal.command, proposal.args,
+    );
+
+    const completedAt = now();
+    const succeeded = nativeResult.allowed && nativeResult.exit_code === 0 && !nativeResult.error;
+
+    // Build execution result
+    const result: CommandExecutionResult = {
+      proposalId: id,
+      startedAt: proposal.proposedAt,
+      completedAt,
+      exitCode: nativeResult.exit_code,
+      stdout: nativeResult.stdout,
+      stderr: nativeResult.stderr,
+      succeeded,
+      summary: succeeded
+        ? `Command succeeded (exit code 0, ${nativeResult.duration_ms}ms)`
+        : nativeResult.error ?? `Failed with exit code ${nativeResult.exit_code}`,
+      durationMs: nativeResult.duration_ms,
+    };
+
+    // Update proposal status and store result
+    if (succeeded) {
+      this.markSucceeded(id, result);
+      voiceRuntimeService.emit('tool_completed', {
+        toolName: proposal.command,
+        proposalId: id,
+        durationMs: nativeResult.duration_ms,
+      });
+    } else {
+      this.markFailed(id, result.summary);
+      voiceRuntimeService.emit('error', {
+        message: `Command failed: ${proposal.command}`,
+        proposalId: id,
+      });
+    }
+
+    // Record to timeline with proposalId as entityId for correlation
+    runtimeTimeline.addEvent({
+      timestamp: Date.now(),
+      severity: succeeded ? 'success' : 'error',
+      category: 'tool',
+      title: succeeded
+        ? `Executed: ${proposal.command} (${nativeResult.duration_ms}ms)`
+        : `Failed: ${proposal.command} — ${result.summary}`,
+      detail: JSON.stringify({
+        exitCode: nativeResult.exit_code,
+        durationMs: nativeResult.duration_ms,
+        stdoutLines: nativeResult.stdout.split('\n').length,
+        stderrLines: nativeResult.stderr.split('\n').length,
+      }),
+      source: 'native-bridge',
+      entityId: id,
+    });
+
+    return result;
   }
 
   // ── Private ───────────────────────────────────────────────────────────────

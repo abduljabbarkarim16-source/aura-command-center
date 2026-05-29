@@ -14,16 +14,17 @@ import { Layout } from './components/Layout';
 // ─── Lazy page imports ────────────────────────────────────────────────────────
 // Each named export is wrapped so React.lazy receives a default export.
 
-const Console    = lazy(() => import('./pages/Console').then(m    => ({ default: m.Console })));
-const Dashboard  = lazy(() => import('./pages/Dashboard').then(m  => ({ default: m.Dashboard })));
-const Projects   = lazy(() => import('./pages/Projects').then(m   => ({ default: m.Projects })));
-const Agents     = lazy(() => import('./pages/Agents').then(m     => ({ default: m.Agents })));
-const Memory     = lazy(() => import('./pages/Memory').then(m     => ({ default: m.Memory })));
-const Handoffs   = lazy(() => import('./pages/Handoffs').then(m   => ({ default: m.Handoffs })));
-const Connectors = lazy(() => import('./pages/Connectors').then(m => ({ default: m.Connectors })));
-const ToolLogs   = lazy(() => import('./pages/ToolLogs').then(m   => ({ default: m.ToolLogs })));
-const Settings   = lazy(() => import('./pages/Settings').then(m   => ({ default: m.Settings })));
-const Relay      = lazy(() => import('./pages/Relay').then(m      => ({ default: m.Relay })));
+const Console      = lazy(() => import('./pages/Console').then(m      => ({ default: m.Console })));
+const Dashboard    = lazy(() => import('./pages/Dashboard').then(m    => ({ default: m.Dashboard })));
+const Projects     = lazy(() => import('./pages/Projects').then(m     => ({ default: m.Projects })));
+const Agents       = lazy(() => import('./pages/Agents').then(m       => ({ default: m.Agents })));
+const Memory       = lazy(() => import('./pages/Memory').then(m       => ({ default: m.Memory })));
+const Handoffs     = lazy(() => import('./pages/Handoffs').then(m     => ({ default: m.Handoffs })));
+const Connectors   = lazy(() => import('./pages/Connectors').then(m   => ({ default: m.Connectors })));
+const ToolLogs     = lazy(() => import('./pages/ToolLogs').then(m     => ({ default: m.ToolLogs })));
+const Settings     = lazy(() => import('./pages/Settings').then(m     => ({ default: m.Settings })));
+const Relay        = lazy(() => import('./pages/Relay').then(m        => ({ default: m.Relay })));
+const CommandQueue = lazy(() => import('./pages/CommandQueue').then(m => ({ default: m.CommandQueue })));
 
 // ─── Suspense fallback ────────────────────────────────────────────────────────
 
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="logs"       element={<ToolLogs />} />
             <Route path="settings"   element={<Settings />} />
             <Route path="relay"      element={<Relay />} />
+            <Route path="commands"   element={<CommandQueue />} />
           </Route>
         </Routes>
       </Suspense>

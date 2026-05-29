@@ -57,6 +57,8 @@ export interface CommandExecutionResult {
   stderr: string;
   succeeded: boolean;
   summary: string;
+  /** Execution duration in milliseconds (from native bridge) */
+  durationMs?: number;
 }
 
 // ─── Audit event ──────────────────────────────────────────────────────────────
