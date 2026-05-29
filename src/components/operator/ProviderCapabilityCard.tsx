@@ -75,12 +75,12 @@ const PROVIDERS: ProviderDef[] = [
 
   // ── Voice providers — planned for Phase 3 ────────────────────────────────
   {
-    id: 'voice-tts',
-    name: 'Voice TTS Provider',
+    id: 'elevenlabs',
+    name: 'ElevenLabs TTS',
     icon: <Volume2 className="w-4 h-4 text-zinc-500" />,
-    envKey: null,
+    envKey: 'VITE_ELEVENLABS_API_KEY',
     tier: 'planned',
-    note: 'OpenAI TTS · ElevenLabs · Windows native — not configured',
+    note: 'High-quality neural voice — Phase 3',
   },
   {
     id: 'voice-stt',
@@ -88,15 +88,15 @@ const PROVIDERS: ProviderDef[] = [
     icon: <Mic2 className="w-4 h-4 text-zinc-500" />,
     envKey: null,
     tier: 'planned',
-    note: 'OpenAI Whisper · browser SpeechRecognition — not configured',
+    note: 'OpenAI Whisper · browser SpeechRecognition — Phase 3',
   },
   {
     id: 'voice-realtime',
-    name: 'Realtime Voice Channel',
+    name: 'OpenAI Realtime Voice',
     icon: <Radio className="w-4 h-4 text-zinc-500" />,
-    envKey: null,
+    envKey: 'VITE_OPENAI_REALTIME_KEY',
     tier: 'concept',
-    note: 'OpenAI Realtime API · WebRTC — future phase',
+    note: 'Full-duplex WebRTC voice channel — Phase 3',
   },
 ];
 

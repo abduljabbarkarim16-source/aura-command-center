@@ -1,5 +1,5 @@
 /**
- * VoiceRuntimeService — AURA Phase 2F Voice Runtime Foundation
+ * VoiceRuntimeService — AURA Phase 2F/2G Voice Runtime Foundation
  *
  * Central singleton that owns the mutable voice runtime state and emits
  * snapshot updates to all React subscribers via a lightweight pub/sub model.
@@ -22,6 +22,7 @@
  */
 
 import { notificationService } from '../notifications/NotificationService';
+import { settingsService } from '../settings/SettingsService';
 import type {
   VoiceRuntimeState,
   VoiceRuntimeEvent,
@@ -45,9 +46,9 @@ type SnapshotListener = (snapshot: VoiceRuntimeSnapshot) => void;
 // ─── Default mission ──────────────────────────────────────────────────────────
 
 const DEFAULT_MISSION: VoiceMission = {
-  name:     'AURA Phase 2F',
-  phase:    'Voice Runtime',
-  progress:  78,
+  name:     'AURA Phase 2G',
+  phase:    'Runtime Wiring',
+  progress:  84,
   agent:    'Claude Architect',
 };
 
@@ -243,6 +244,31 @@ class VoiceRuntimeService {
     this.emit('aura_stopped_speaking');
   }
 
+  // ── Persistence (Phase 2G) ────────────────────────────────────────────────
+
+  /**
+   * Reads persisted muted and safeMode from SettingsService and applies them.
+   * Should be called once at app startup (from useVoiceRuntime on mount).
+   * Async — state starts at defaults, updates after settings load.
+   */
+  async initFromSettings(): Promise<void> {
+    try {
+      const settings = await settingsService.getSettings();
+      let changed = false;
+      if (settings.assistantMuted !== this._isMuted) {
+        this._isMuted = settings.assistantMuted;
+        changed = true;
+      }
+      if (settings.safeMonitorMode !== this._isSafeMode) {
+        this._isSafeMode = settings.safeMonitorMode;
+        changed = true;
+      }
+      if (changed) this.broadcast();
+    } catch {
+      // Settings unavailable — retain defaults (isMuted=false, isSafeMode=false)
+    }
+  }
+
   // ── Mute / safe mode ──────────────────────────────────────────────────────
 
   setMuted(muted: boolean): void {
@@ -253,11 +279,15 @@ class VoiceRuntimeService {
     } else if (!muted && this._state === 'muted') {
       this._state = 'ready';
     }
+    // Persist to settings (fire-and-forget; never awaited)
+    settingsService.updateSettings({ assistantMuted: muted }).catch(() => {});
     this.broadcast();
   }
 
   setSafeMode(safe: boolean): void {
     this._isSafeMode = safe;
+    // Persist to settings (fire-and-forget)
+    settingsService.updateSettings({ safeMonitorMode: safe }).catch(() => {});
     this.broadcast();
   }
 

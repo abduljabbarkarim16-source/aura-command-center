@@ -70,6 +70,8 @@ export function useVoiceRuntime(): UseVoiceRuntimeResult {
   );
 
   useEffect(() => {
+    // Bootstrap persisted muted/safeMode from SettingsService (Phase 2G).
+    voiceRuntimeService.initFromSettings();
     // subscribe() delivers the current snapshot immediately, then on each change.
     return voiceRuntimeService.subscribe(setSnapshot);
   }, []);
