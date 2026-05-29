@@ -1,0 +1,87 @@
+/**
+ * AURA version constants — updated each phase.
+ * Displayed in Settings and Dashboard so every build is identifiable.
+ *
+ * Version scheme:
+ *   0.1.x  — Phase 1  (UI architecture)
+ *   0.2.x  — Phase 2  (foundation, persistence, relay, command policy)
+ *   0.3.x  — Phase 3  (live providers, self-build, voice)
+ *   0.3.0  — Phase 3A (live connection verification)
+ *   0.3.1  — Phase 3B (self-build dry run, voice foundation)
+ *   0.3.2  — Phase 3C (voice conversation MVP — STT/Chat/TTS via Tauri backend)
+ */
+
+export const APP_VERSION = '0.3.2';
+export const APP_PHASE   = 'Phase 3C';
+export const APP_PHASE_LABEL = 'Voice Conversation MVP';
+export const BUILD_DATE  = '2026-05-29';
+
+/** Full display string shown in Settings header and About chip */
+export const VERSION_DISPLAY = `v${APP_VERSION} · ${APP_PHASE}`;
+
+/** Changelog — newest entry first */
+export interface ChangelogEntry {
+  version: string;
+  phase:   string;
+  date:    string;
+  summary: string;
+  highlights: string[];
+}
+
+export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version:  '0.3.2',
+    phase:    'Phase 3C',
+    date:     '2026-05-29',
+    summary:  'Voice Conversation MVP',
+    highlights: [
+      'Real microphone recording via push-to-talk (15s max)',
+      'OpenAI Whisper STT → gpt-4o-mini Chat → OpenAI TTS — all via Tauri backend',
+      'API key held in Rust; never exposed to frontend',
+      'Conversation panel with history, visualizer states per turn',
+      'Voice On/Off toggle in Voice Core',
+      'VoiceReadinessCard with enable toggle + TTS voice selector',
+    ],
+  },
+  {
+    version:  '0.3.1',
+    phase:    'Phase 3B',
+    date:     '2026-05-29',
+    summary:  'Self-Build Dry Run & Voice Foundation',
+    highlights: [
+      'SelfBuildDryRunService — controlled plan + command proposals',
+      'ProviderPlanningService — live Anthropic planning call (max 64 tokens)',
+      'Voice session types and VoiceSessionService',
+      'OpenAIVoiceSessionService stubs (dry-run capable)',
+      'VoiceTranscriptService with 7 event types',
+      'Provider gate: dryRunReady flag (workspace optional for dry runs)',
+    ],
+  },
+  {
+    version:  '0.3.0',
+    phase:    'Phase 3A',
+    date:     '2026-05-29',
+    summary:  'Live Connection Verification',
+    highlights: [
+      'Make.com AURA Core Event Router scenario created (ID 5226882)',
+      'Anthropic smoke test: PASSED',
+      'OpenAI smoke test: PASSED',
+      'Gemini: quota-limited (billing enabled, credits needed)',
+      'MakeConnectorService: live calls, localStorage persistence, env-based init',
+      'ProviderSmokeTestService with live test UI',
+    ],
+  },
+  {
+    version:  '0.2.0',
+    phase:    'Phase 2 (A–G)',
+    date:     '2026-05-27',
+    summary:  'Foundation & Desktop Architecture',
+    highlights: [
+      'Tauri desktop shell, React + TypeScript frontend',
+      'Local persistence, Settings, provider registry',
+      'Approval-gated reasoning relay, command policy engine',
+      'Voice runtime (mock), self-build orchestrator',
+      'Native execution bridge with Rust allowlist',
+    ],
+  },
+];

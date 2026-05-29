@@ -14,6 +14,7 @@ import {
   Terminal, Workflow, ArrowRight, Sparkles,
   Cpu, GitBranch, Database,
 } from 'lucide-react';
+import { VERSION_DISPLAY } from '../lib/appVersion';
 import { mockAgents, mockTasks, mockProjects } from '../store/mockData';
 import { FuturePlaceholderCards } from '../components/operator/FuturePlaceholderCards';
 import { ProviderCapabilityCard } from '../components/operator/ProviderCapabilityCard';
@@ -66,6 +67,9 @@ export function Dashboard() {
           <h1 className="text-2xl font-semibold tracking-tight text-white">Operations</h1>
           <p className="text-zinc-500 text-[13px] mt-1">
             {activeProj.name} · {workingAgents.length} agent{workingAgents.length !== 1 ? 's' : ''} active
+            <span className="ml-2 text-[11px] font-semibold text-indigo-400 bg-indigo-500/10 border border-indigo-500/25 px-2 py-0.5 rounded-full align-middle">
+              {VERSION_DISPLAY}
+            </span>
           </p>
         </div>
         <button

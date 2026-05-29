@@ -30,6 +30,7 @@ import type { KeyStorageStatus } from '../types/settings';
 import { MakeConnectorCard } from '../components/connectors/MakeConnectorCard';
 import { SecureKeysCard } from '../components/security/SecureKeysCard';
 import { VoiceReadinessCard } from '../components/operator/VoiceReadinessCard';
+import { VERSION_DISPLAY, APP_PHASE_LABEL, BUILD_DATE, CHANGELOG } from '../lib/appVersion';
 
 // ---------------------------------------------------------------------------
 // Helper components
@@ -266,6 +267,52 @@ function ProviderRow({
 // ---------------------------------------------------------------------------
 // Main Settings page
 // ---------------------------------------------------------------------------
+// Changelog panel
+// ---------------------------------------------------------------------------
+
+function ChangelogPanel() {
+  const [open, setOpen] = useState(false);
+  const latest = CHANGELOG[0];
+  return (
+    <section className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+      <button className="w-full text-left" onClick={() => setOpen(o => !o)}>
+        <div className="px-5 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] font-semibold text-indigo-400 bg-indigo-500/10 border border-indigo-500/25 px-2 py-0.5 rounded-full">
+              {VERSION_DISPLAY}
+            </span>
+            <span className="text-sm font-medium text-zinc-200">{latest.summary}</span>
+            <span className="text-xs text-zinc-500">{latest.date}</span>
+          </div>
+          {open ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+        </div>
+      </button>
+      {open && (
+        <div className="border-t border-zinc-800 px-5 py-4 space-y-4">
+          {CHANGELOG.map(entry => (
+            <div key={entry.version}>
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="text-[11px] font-mono text-indigo-400">v{entry.version}</span>
+                <span className="text-xs font-semibold text-zinc-300">{entry.phase}</span>
+                <span className="text-xs text-zinc-500">— {entry.summary}</span>
+                <span className="ml-auto text-[10px] text-zinc-600">{entry.date}</span>
+              </div>
+              <ul className="space-y-0.5 pl-3">
+                {entry.highlights.map((h, i) => (
+                  <li key={i} className="text-[11px] text-zinc-500 flex items-start gap-1.5">
+                    <span className="text-indigo-500 mt-0.5">·</span>{h}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 
 export function Settings() {
   const {
@@ -328,10 +375,16 @@ export function Settings() {
           <h1 className="text-2xl font-semibold tracking-tight text-white mb-1">Settings</h1>
           <p className="text-zinc-400 text-sm">Local configuration for AURA Command Center</p>
         </div>
-        <span className="text-xs text-zinc-600 border border-zinc-800 px-2 py-1 rounded">
-          Phase 3A · live config
-        </span>
+        <div className="flex flex-col items-end gap-1">
+          <span className="text-xs font-semibold text-indigo-400 border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1 rounded-full">
+            {VERSION_DISPLAY}
+          </span>
+          <span className="text-[10px] text-zinc-600">{APP_PHASE_LABEL} · {BUILD_DATE}</span>
+        </div>
       </div>
+
+      {/* Changelog (collapsed by default) */}
+      <ChangelogPanel />
 
       {/* Toast */}
       {toast && (
