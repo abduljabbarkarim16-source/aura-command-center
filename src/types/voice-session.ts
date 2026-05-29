@@ -1,13 +1,12 @@
 /**
- * voice-session.ts — AURA Phase 3B
+ * voice-session.ts — AURA Phase 3C
  *
  * Type vocabulary for voice session management.
- * Supports: OpenAI STT/TTS (request-based), OpenAI Realtime (future WebRTC),
- *            ElevenLabs TTS (optional), browser fallback, and local mock mode.
+ * Phase 3C adds full conversation turn types and recording state.
  *
  * Security invariants:
- * - API keys are never stored here — only presence flags and session tokens
- * - Session tokens are ephemeral and scoped to a single voice turn
+ * - API keys are never stored here
+ * - Transcripts are stored in memory only; never contain secrets
  * - No audio data is ever stored in these types
  */
 
@@ -15,41 +14,104 @@
 
 export type VoiceSessionMode =
   | 'mock'           // No real API, local simulation
-  | 'request_based'  // STT via Whisper, TTS via OpenAI/ElevenLabs — per-request
-  | 'realtime'       // Full-duplex WebRTC (OpenAI Realtime API — future)
+  | 'request_based'  // STT/TTS via OpenAI per-request — Phase 3C active mode
+  | 'realtime'       // Full-duplex WebRTC (OpenAI Realtime — future)
   | 'locked';        // Requires approval before any voice call
 
 export type VoiceSessionStatus =
   | 'idle'
   | 'initializing'
   | 'ready'
+  | 'recording'
   | 'transcribing'
-  | 'generating_response'
-  | 'playing_audio'
+  | 'thinking'
+  | 'responding'
+  | 'speaking'
   | 'error'
   | 'locked';
 
-// ─── Provider config (no key values) ─────────────────────────────────────────
+// ─── Recording state ──────────────────────────────────────────────────────────
+
+export type MicPermission = 'not_requested' | 'pending' | 'granted' | 'denied' | 'unsupported';
+
+export interface VoiceRecordingState {
+  isRecording: boolean;
+  durationMs: number;
+  micPermission: MicPermission;
+  error?: string;
+}
+
+// ─── Provider config ──────────────────────────────────────────────────────────
 
 export type VoiceSTTProvider =
-  | 'openai-whisper'   // POST to /v1/audio/transcriptions — uses VITE_OPENAI_API_KEY
-  | 'openai-realtime'  // WebRTC session — uses ephemeral client secret
+  | 'openai-whisper'   // POST to /v1/audio/transcriptions — via Tauri backend
+  | 'openai-realtime'  // WebRTC session — future
   | 'browser-speech'   // SpeechRecognition API — no key
   | 'mock';
 
 export type VoiceTTSProvider =
-  | 'openai-tts'       // POST to /v1/audio/speech — uses VITE_OPENAI_API_KEY
-  | 'elevenlabs'       // ElevenLabs API — uses VITE_ELEVENLABS_API_KEY
+  | 'openai-tts'       // POST to /v1/audio/speech — via Tauri backend
+  | 'elevenlabs'       // ElevenLabs — optional
   | 'browser-synth'    // speechSynthesis — no key
   | 'mock';
 
 export interface VoiceProviderConfig {
   stt: VoiceSTTProvider;
   tts: VoiceTTSProvider;
-  /** True if provider has a key configured */
   sttReady: boolean;
   ttsReady: boolean;
 }
+
+// ─── Conversation turn ────────────────────────────────────────────────────────
+
+export interface VoiceConversationTurn {
+  id: string;
+  userText: string;
+  auraText: string;
+  timestamp: string;
+  sttLatencyMs?: number;
+  chatLatencyMs?: number;
+  ttsLatencyMs?: number;
+}
+
+// ─── Result types ─────────────────────────────────────────────────────────────
+
+export interface VoiceTranscriptionResult {
+  success: boolean;
+  text?: string;
+  latencyMs?: number;
+  error?: string;
+}
+
+export interface VoiceChatResult {
+  success: boolean;
+  text?: string;
+  latencyMs?: number;
+  error?: string;
+}
+
+export interface VoiceSpeechResult {
+  success: boolean;
+  audioBlobUrl?: string;  // Object URL — caller revokes after playback
+  latencyMs?: number;
+  error?: string;
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+
+export interface VoiceConversationSettings {
+  enabled: boolean;
+  maxRecordingDurationMs: number;   // default 15_000
+  ttsVoice: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+  persistTranscripts: boolean;      // default false
+}
+
+export const DEFAULT_VOICE_SETTINGS: VoiceConversationSettings = {
+  enabled: false,
+  maxRecordingDurationMs: 15_000,
+  ttsVoice: 'alloy',
+  persistTranscripts: false,
+};
 
 // ─── Session ──────────────────────────────────────────────────────────────────
 
@@ -58,7 +120,6 @@ export interface VoiceSession {
   mode: VoiceSessionMode;
   status: VoiceSessionStatus;
   providerConfig: VoiceProviderConfig;
-  /** Ephemeral client secret for Realtime sessions — never persisted */
   ephemeralToken?: string;
   createdAt: string;
   lastActivity: string;
@@ -81,11 +142,8 @@ export interface VoiceTranscriptEvent {
   sessionId: string;
   type: VoiceTranscriptEventType;
   timestamp: string;
-  /** Sanitised transcript text — no secrets */
   text?: string;
-  /** Partial or final */
   isFinal?: boolean;
-  /** Duration of audio in ms, if known */
   audioDurationMs?: number;
   error?: string;
 }
@@ -100,13 +158,13 @@ export interface VoiceReadinessSnapshot {
   ttsProvider: VoiceTTSProvider;
   sttReady: boolean;
   ttsReady: boolean;
-  realtimeReady: boolean;       // Requires separate realtime key or session service
-  microphonePermission: 'pending' | 'granted' | 'denied' | 'not_requested';
-  liveVoiceLocked: boolean;     // Stays true until explicit approval gate is passed
+  realtimeReady: boolean;
+  microphonePermission: MicPermission;
+  liveVoiceLocked: boolean;
   notes: string[];
 }
 
-// ─── OpenAI session create request/response ───────────────────────────────────
+// ─── OpenAI Realtime (future) ─────────────────────────────────────────────────
 
 export interface OpenAIRealtimeSessionRequest {
   model: string;
@@ -119,7 +177,7 @@ export interface OpenAIRealtimeSessionResponse {
   object: 'realtime.session';
   model: string;
   client_secret: {
-    value: string;   // Ephemeral — use once, never store
+    value: string;
     expires_at: number;
   };
 }
