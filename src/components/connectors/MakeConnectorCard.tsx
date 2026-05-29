@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Webhook, Plus, Trash2, Play, CheckCircle2, AlertCircle, XCircle } from 'lucide-react';
+import { Webhook, Plus, Trash2, Play, Zap, CheckCircle2, AlertCircle, XCircle } from 'lucide-react';
 import { makeConnectorService } from '../../services/connectors/MakeConnectorService';
 import { makeBlueprintService } from '../../services/connectors/MakeBlueprintService';
 import type { MakeScenarioConfig, MakeConnectionStatus, MakeScenarioEvent } from '../../types/make-connector';
+
+const LIVE_CALLS = import.meta.env.VITE_MAKE_LIVE_CALLS === 'true';
 
 export function MakeConnectorCard() {
   const [status, setStatus] = useState<MakeConnectionStatus>(makeConnectorService.getConnectionStatus());
@@ -54,10 +56,17 @@ export function MakeConnectorCard() {
     makeConnectorService.removeScenario(id);
   };
 
-  const handleTest = async (id: string, eventType: MakeScenarioEvent) => {
+  const handleDryRun = async (id: string, eventType: MakeScenarioEvent) => {
     const res = await makeConnectorService.triggerScenarioDryRun(id, eventType);
-    setTestResult(res.message || 'Dry-run tested.');
+    setTestResult(res.message || 'Dry-run complete.');
     setTimeout(() => setTestResult(null), 3000);
+  };
+
+  const handleLiveTest = async (id: string, eventType: MakeScenarioEvent) => {
+    setTestResult('Sending to Make.com…');
+    const res = await makeConnectorService.triggerScenarioLiveTest(id, eventType);
+    setTestResult(res.success ? `Live test sent. Status: ${res.statusCode ?? 'ok'}` : `Failed: ${res.message}`);
+    setTimeout(() => setTestResult(null), 5000);
   };
 
   return (
@@ -99,7 +108,12 @@ export function MakeConnectorCard() {
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium text-white">{s.name}</span>
               <div className="flex gap-2">
-                <button onClick={() => handleTest(s.id, s.trigger.events[0])} className="text-zinc-400 hover:text-indigo-400 p-1" title="Dry-run Test">
+                {LIVE_CALLS && (
+                  <button onClick={() => handleLiveTest(s.id, s.trigger.events[0])} className="text-zinc-400 hover:text-emerald-400 p-1" title="Live Test (sends real payload)">
+                    <Zap className="w-4 h-4" />
+                  </button>
+                )}
+                <button onClick={() => handleDryRun(s.id, s.trigger.events[0])} className="text-zinc-400 hover:text-indigo-400 p-1" title="Dry-run Test">
                   <Play className="w-4 h-4" />
                 </button>
                 <button onClick={() => handleRemove(s.id)} className="text-zinc-400 hover:text-rose-400 p-1" title="Remove">
@@ -170,8 +184,11 @@ export function MakeConnectorCard() {
           </div>
         )}
 
-        <div className="mt-2 p-3 bg-amber-500/5 border border-amber-500/20 rounded-lg text-xs text-amber-400/80">
-          <strong>Approval Requirement:</strong> In the current Foundation phase, live calls are disabled. The test button executes a dry-run payload validation only. Webhook URLs are explicitly masked and not stored in localStorage.
+        <div className={`mt-2 p-3 rounded-lg text-xs ${LIVE_CALLS ? 'bg-emerald-500/5 border border-emerald-500/20 text-emerald-400/80' : 'bg-amber-500/5 border border-amber-500/20 text-amber-400/80'}`}>
+          {LIVE_CALLS
+            ? <><strong>Phase 3A — Live.</strong> Real payloads are sent to Make.com. Use <Zap className="inline w-3 h-3" /> for a live test and <Play className="inline w-3 h-3" /> for a local dry-run.</>
+            : <><strong>Dry-run only.</strong> Set <code>VITE_MAKE_LIVE_CALLS=true</code> in .env to enable real payloads.</>
+          }
         </div>
       </div>
     </div>

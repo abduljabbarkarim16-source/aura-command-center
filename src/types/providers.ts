@@ -36,6 +36,8 @@ export type ProviderStatus =
   | 'missing_secret'
   | 'dry_run_ready'
   | 'live_test_required'
+  | 'live_test_passed'
+  | 'live_test_failed'
   | 'disabled'
   | 'error'
   | 'planned'       // Capability planned; infrastructure not yet built

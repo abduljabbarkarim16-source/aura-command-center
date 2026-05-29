@@ -9,7 +9,7 @@ export interface MakeWebhookConfig {
   isValid: boolean;
 }
 
-export type MakeScenarioEvent = 
+export type MakeScenarioEvent =
   | 'self_build_plan_created'
   | 'command_proposed'
   | 'command_completed'
@@ -19,7 +19,8 @@ export type MakeScenarioEvent =
   | 'runtime_error'
   | 'relay_ready'
   | 'handoff_created'
-  | 'build_completed';
+  | 'build_completed'
+  | 'phase3_connection_test';
 
 export interface MakeScenarioTrigger {
   events: MakeScenarioEvent[];

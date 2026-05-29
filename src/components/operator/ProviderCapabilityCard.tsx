@@ -13,12 +13,14 @@ import React, { Fragment, useEffect, useState } from 'react';
 import {
   CheckCircle2, XCircle, Lock, Network, BrainCircuit,
   Sparkles, Bot, Orbit, MessageSquare, Volume2, Mic2, Radio,
-  Play
+  Play, Zap, Loader2
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { providerRegistry } from '../../services/providers/ProviderRegistryService';
 import { providerAdapterService } from '../../services/providers/ProviderAdapterService';
 import { secureKeyService } from '../../services/security/SecureKeyService';
+import { providerSmokeTestService } from '../../services/providers/ProviderSmokeTestService';
+import type { SmokeTestResult } from '../../services/providers/ProviderSmokeTestService';
 import type { ProviderHealth } from '../../types/providers';
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -31,15 +33,12 @@ interface ProviderCapabilityCardProps {
 export function ProviderCapabilityCard({ className, compact = false }: ProviderCapabilityCardProps) {
   const [providers, setProviders] = useState<ProviderHealth[]>([]);
   const [dryRunResults, setDryRunResults] = useState<Record<string, string>>({});
+  const [liveResults, setLiveResults] = useState<Record<string, SmokeTestResult>>({});
+  const [liveTestPending, setLiveTestPending] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    // Initial load
     setProviders(providerRegistry.getAll());
-
-    // Subscribe to secureKeyService changes
-    const unsub = secureKeyService.subscribe(() => {
-      setProviders(providerRegistry.getAll());
-    });
+    const unsub = secureKeyService.subscribe(() => setProviders(providerRegistry.getAll()));
     return unsub;
   }, []);
 
@@ -54,12 +53,18 @@ export function ProviderCapabilityCard({ className, compact = false }: ProviderC
     const res = providerAdapterService.dryRun(providerType);
     setDryRunResults(prev => ({ ...prev, [providerType]: res.wouldSucceed ? 'Dry-run OK' : 'Dry-run Failed' }));
     setTimeout(() => {
-      setDryRunResults(prev => {
-        const next = { ...prev };
-        delete next[providerType];
-        return next;
-      });
+      setDryRunResults(prev => { const next = { ...prev }; delete next[providerType]; return next; });
     }, 3000);
+  };
+
+  const handleLiveTest = async (providerType: string) => {
+    setLiveTestPending(prev => ({ ...prev, [providerType]: true }));
+    let result: SmokeTestResult | undefined;
+    if (providerType === 'anthropic') result = await providerSmokeTestService.testAnthropic();
+    else if (providerType === 'openai') result = await providerSmokeTestService.testOpenAI();
+    else if (providerType === 'gemini') result = await providerSmokeTestService.testGemini();
+    if (result) setLiveResults(prev => ({ ...prev, [providerType]: result! }));
+    setLiveTestPending(prev => ({ ...prev, [providerType]: false }));
   };
 
   return (
@@ -93,6 +98,9 @@ export function ProviderCapabilityCard({ className, compact = false }: ProviderC
               compact={compact}
               dryRunResult={dryRunResults[provider.providerType]}
               onDryRun={() => handleDryRun(provider.providerType)}
+              liveResult={liveResults[provider.providerType]}
+              liveTestPending={liveTestPending[provider.providerType] ?? false}
+              onLiveTest={['anthropic', 'openai', 'gemini'].includes(provider.providerType) ? () => handleLiveTest(provider.providerType) : undefined}
             />
           </Fragment>
         ))}
@@ -153,15 +161,22 @@ function ProviderRow({
   compact,
   isPlanned = false,
   dryRunResult,
-  onDryRun
+  onDryRun,
+  liveResult,
+  liveTestPending = false,
+  onLiveTest,
 }: {
   provider: ProviderHealth;
   compact: boolean;
   isPlanned?: boolean;
   dryRunResult?: string;
   onDryRun?: () => void;
+  liveResult?: SmokeTestResult;
+  liveTestPending?: boolean;
+  onLiveTest?: () => void;
 }) {
-  const isConfigured = provider.status === 'secret_configured' || provider.status === 'dry_run_ready';
+  const isConfigured = provider.status === 'secret_configured' || provider.status === 'dry_run_ready'
+    || provider.status === 'live_test_passed' || provider.status === 'live_test_failed';
 
   return (
     <div className={cn(
@@ -175,51 +190,65 @@ function ProviderRow({
           {getProviderIcon(provider.providerType)}
         </div>
         <div className="min-w-0 flex flex-col">
-          <span className={cn(
-            'block text-[13px] font-medium truncate',
-            isPlanned ? 'text-zinc-600' : 'text-zinc-300',
-          )}>
+          <span className={cn('block text-[13px] font-medium truncate', isPlanned ? 'text-zinc-600' : 'text-zinc-300')}>
             {provider.displayName}
           </span>
           <span className="block text-[10px] text-zinc-600 font-mono truncate mt-0.5">
             {provider.maskedSecretRef || (provider.keyEnvVar ? `ENV::${provider.keyEnvVar}` : 'No secret required')}
           </span>
+          {liveResult && (
+            <span className={cn('block text-[10px] mt-0.5', liveResult.success ? 'text-emerald-400' : 'text-rose-400')}>
+              {liveResult.success
+                ? `Live OK · ${liveResult.model} · ${liveResult.latencyMs}ms`
+                : `Live FAIL · ${liveResult.error ?? 'unknown error'}`}
+            </span>
+          )}
         </div>
       </div>
 
       {/* Right: status and actions */}
-      <div className="flex items-center gap-3 flex-shrink-0">
+      <div className="flex items-center gap-2 flex-shrink-0">
         {dryRunResult && (
-           <span className={cn("text-[10px] px-1.5 py-0.5 rounded", dryRunResult.includes('OK') ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
-             {dryRunResult}
-           </span>
+          <span className={cn('text-[10px] px-1.5 py-0.5 rounded', dryRunResult.includes('OK') ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400')}>
+            {dryRunResult}
+          </span>
         )}
-        
+
         {isPlanned ? (
           <span className="px-2 py-0.5 bg-zinc-800/60 border border-zinc-700/40 text-zinc-600 text-[10px] font-semibold rounded-full uppercase tracking-wide">
-            PLANNED
+            {provider.integrationMode === 'local-workspace-agent' ? 'LOCAL AGENT' : 'PLANNED'}
           </span>
         ) : provider.keyEnvVar === null ? (
           <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            Ready
+            <CheckCircle2 className="w-3.5 h-3.5" /> Ready
           </span>
         ) : isConfigured ? (
           <div className="flex items-center gap-2">
-            {onDryRun && (
-               <button onClick={onDryRun} className="text-zinc-500 hover:text-indigo-400 p-1 rounded" title="Dry-run adapter">
-                 <Play className="w-3.5 h-3.5" />
-               </button>
+            {onLiveTest && (
+              <button
+                onClick={onLiveTest}
+                disabled={liveTestPending}
+                className="text-zinc-500 hover:text-emerald-400 disabled:opacity-40 p-1 rounded"
+                title="Live smoke test (one call, minimal prompt)"
+              >
+                {liveTestPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+              </button>
             )}
-            <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
+            {onDryRun && (
+              <button onClick={onDryRun} className="text-zinc-500 hover:text-indigo-400 p-1 rounded" title="Dry-run adapter check">
+                <Play className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <span className={cn('flex items-center gap-1 text-[11px] font-semibold',
+              liveResult?.success ? 'text-emerald-400' : liveResult?.success === false ? 'text-rose-400' : 'text-emerald-400'
+            )}>
               <CheckCircle2 className="w-3.5 h-3.5" />
-              Secret Found
+              {liveResult?.success ? 'Live OK' : liveResult?.success === false ? 'Live Failed' : 'Secret Found'}
             </span>
           </div>
         ) : (
           <span className="flex items-center gap-1 text-[11px] font-semibold text-zinc-600">
-            <XCircle className="w-3.5 h-3.5" />
-            Missing Secret
+            <XCircle className="w-3.5 h-3.5" /> Missing Secret
           </span>
         )}
       </div>

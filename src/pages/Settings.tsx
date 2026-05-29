@@ -328,7 +328,7 @@ export function Settings() {
           <p className="text-zinc-400 text-sm">Local configuration for AURA Command Center</p>
         </div>
         <span className="text-xs text-zinc-600 border border-zinc-800 px-2 py-1 rounded">
-          Phase 2E · local config
+          Phase 3A · live config
         </span>
       </div>
 
