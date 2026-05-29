@@ -49,9 +49,6 @@ class OpenAIVoiceSessionServiceImpl {
   // ── STT: transcribe audio via Tauri backend ───────────────────────────────
 
   async transcribeAudio(audioBlob: Blob): Promise<VoiceTranscriptionResult> {
-    if (!this.isReady()) {
-      return { success: false, error: 'OpenAI key not configured' };
-    }
     const start = Date.now();
     try {
       // Convert blob to byte array for Tauri transfer

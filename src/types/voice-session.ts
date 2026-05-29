@@ -107,7 +107,7 @@ export interface VoiceConversationSettings {
 }
 
 export const DEFAULT_VOICE_SETTINGS: VoiceConversationSettings = {
-  enabled: false,
+  enabled: true,
   maxRecordingDurationMs: 15_000,
   ttsVoice: 'alloy',
   persistTranscripts: false,

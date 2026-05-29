@@ -129,11 +129,13 @@ export function AuraVoiceCore({
   const status  = useRuntimeStatus();
 
   // ── Voice conversation state ───────────────────────────────────────────────
+  // Voice is always on by default; respect other persisted preferences (ttsVoice etc.)
   const [voiceSettings, setVoiceSettings] = useState<VoiceConversationSettings>(() => {
     try {
       const stored = localStorage.getItem('voice.conversation.settings');
-      return stored ? { ...DEFAULT_VOICE_SETTINGS, ...JSON.parse(stored) } : DEFAULT_VOICE_SETTINGS;
-    } catch { return DEFAULT_VOICE_SETTINGS; }
+      const parsed = stored ? (JSON.parse(stored) as Partial<VoiceConversationSettings>) : {};
+      return { ...DEFAULT_VOICE_SETTINGS, ...parsed, enabled: true };
+    } catch { return { ...DEFAULT_VOICE_SETTINGS, enabled: true }; }
   });
   const [convPhase, setConvPhase]         = useState<ConvPhase>('idle');
   const [convError, setConvError]         = useState<string | null>(null);
@@ -142,6 +144,9 @@ export function AuraVoiceCore({
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const runningRef = useRef(false);
+  // Stable ref so the one-time greeting effect can read the latest settings
+  const voiceSettingsRef = useRef(voiceSettings);
+  useEffect(() => { voiceSettingsRef.current = voiceSettings; }, [voiceSettings]);
 
   // ── Legacy mock state ─────────────────────────────────────────────────────
   const [isTrayOpen, setIsTrayOpen]      = useState(false);
@@ -215,14 +220,45 @@ export function AuraVoiceCore({
     return 'aura';
   })();
 
-  // ── Greeting ──────────────────────────────────────────────────────────────
+  // ── Voice intro on startup (once per session) ─────────────────────────────
   useEffect(() => {
     if (greetedRef.current || sessionStorage.getItem(GREETING_SESSION_KEY)) {
       greetedRef.current = true; return;
     }
     greetedRef.current = true;
     sessionStorage.setItem(GREETING_SESSION_KEY, '1');
-    runtime.addRuntimeNotification({ type: 'success', title: "I'm here. Ready to assist.", ttl: 5000 });
+
+    const INTRO = "AURA online. I'm ready to assist. Speak anytime.";
+
+    const timer = setTimeout(async () => {
+      const settings = voiceSettingsRef.current;
+      const result = await openAIVoiceSessionService.synthesizeSpeech(INTRO, settings.ttsVoice);
+      if (result.success && result.audioBlobUrl) {
+        setConvPhase('speaking');
+        setCurrentAudioUrl(result.audioBlobUrl);
+        const audio = new Audio(result.audioBlobUrl);
+        audioRef.current = audio;
+        audio.onended = () => {
+          setConvPhase('idle');
+          URL.revokeObjectURL(result.audioBlobUrl!);
+          setCurrentAudioUrl(null);
+        };
+        audio.onerror = () => {
+          setConvPhase('idle');
+          setCurrentAudioUrl(null);
+          runtime.addRuntimeNotification({ type: 'success', title: "AURA online. Ready to assist.", ttl: 5000 });
+        };
+        audio.play().catch(() => {
+          setConvPhase('idle');
+          setCurrentAudioUrl(null);
+          runtime.addRuntimeNotification({ type: 'success', title: "AURA online. Ready to assist.", ttl: 5000 });
+        });
+      } else {
+        runtime.addRuntimeNotification({ type: 'success', title: "AURA online. Ready to assist.", ttl: 5000 });
+      }
+    }, 1200); // brief delay so the UI settles before audio starts
+
+    return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
