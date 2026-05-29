@@ -336,3 +336,49 @@ fn get_project_root() -> String {
         .map(|d| d.to_string_lossy().to_string())
         .unwrap_or_else(|_| ".".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_allowed_command_success() {
+        let result = run_allowed_command("git".to_string(), vec!["status".to_string(), "--short".to_string()]);
+        assert!(result.allowed, "git status --short should be allowed");
+        assert_eq!(result.exit_code, 0, "git status --short should succeed");
+        assert!(result.duration_ms > 0, "Duration should be recorded");
+    }
+
+    #[test]
+    fn test_unknown_command_rejected() {
+        let result = run_allowed_command("echo".to_string(), vec!["hello".to_string()]);
+        assert!(!result.allowed, "Unknown command should be rejected");
+        assert_eq!(result.error.unwrap(), "Rejected: command is not in the allowlist");
+    }
+
+    #[test]
+    fn test_blocked_executables() {
+        let blocked = vec!["del", "rm", "Remove-Item", "curl"];
+        for cmd in blocked {
+            let result = run_allowed_command(cmd.to_string(), vec!["something".to_string()]);
+            assert!(!result.allowed, "{} should be blocked", cmd);
+            assert!(result.error.unwrap().contains("this executable is not allowed"));
+        }
+    }
+
+    #[test]
+    fn test_git_reset_hard_rejected() {
+        // 'git' is allowed but only for specific args.
+        let result = run_allowed_command("git".to_string(), vec!["reset".to_string(), "--hard".to_string()]);
+        assert!(!result.allowed, "git reset --hard should be rejected");
+        assert_eq!(result.error.unwrap(), "Rejected: command is not in the allowlist");
+    }
+
+    #[test]
+    fn test_metacharacters_rejected() {
+        // Try to inject via an allowed command (though args wouldn't match anyway, metachar check comes first)
+        let result = run_allowed_command("git".to_string(), vec!["status".to_string(), ";".to_string(), "rm".to_string()]);
+        assert!(!result.allowed, "Metacharacters should be rejected");
+        assert!(result.error.unwrap().contains("shell metacharacters detected"));
+    }
+}
