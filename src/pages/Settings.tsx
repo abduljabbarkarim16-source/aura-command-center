@@ -29,6 +29,7 @@ import type { AppSettings, ProviderConfig } from '../types/settings';
 import type { KeyStorageStatus } from '../types/settings';
 import { MakeConnectorCard } from '../components/connectors/MakeConnectorCard';
 import { SecureKeysCard } from '../components/security/SecureKeysCard';
+import { VoiceReadinessCard } from '../components/operator/VoiceReadinessCard';
 
 // ---------------------------------------------------------------------------
 // Helper components
@@ -631,6 +632,11 @@ export function Settings() {
       {/* ── Provider Capability Audit ── */}
       <div>
         <ProviderCapabilityCard />
+      </div>
+
+      {/* ── Voice Readiness ── */}
+      <div>
+        <VoiceReadinessCard />
       </div>
 
       {/* ── Make.com Connector ── */}

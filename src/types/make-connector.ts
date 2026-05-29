@@ -20,7 +20,8 @@ export type MakeScenarioEvent =
   | 'relay_ready'
   | 'handoff_created'
   | 'build_completed'
-  | 'phase3_connection_test';
+  | 'phase3_connection_test'
+  | 'phase3b_self_build_dry_run_completed';
 
 export interface MakeScenarioTrigger {
   events: MakeScenarioEvent[];

@@ -110,16 +110,25 @@ class SelfBuildOrchestratorService {
    * Evaluates if the system is ready for a full autonomous run.
    * Checks providers, connectors, and workspace state.
    */
-  evaluateConnectionReadiness(): { ready: boolean; checks: { name: string; passed: boolean; message: string }[] } {
-    const checks = [];
+  evaluateConnectionReadiness(): {
+    ready: boolean;
+    dryRunReady: boolean;
+    checks: { name: string; passed: boolean; message: string; optional?: boolean }[];
+  } {
+    const checks: { name: string; passed: boolean; message: string; optional?: boolean }[] = [];
 
-    // 1. LLM Provider
+    // 1. LLM Provider (Anthropic + OpenAI are sufficient; Gemini is optional)
     const configuredProviders = providerRegistry.getConfigured();
-    const hasLLM = configuredProviders.some(p => p.capabilities.includes('chat') || p.capabilities.includes('code'));
+    const hasLLM = configuredProviders.some(p =>
+      p.capabilities.includes('chat') || p.capabilities.includes('code')
+    );
+    const hasGemini = configuredProviders.some(p => p.providerType === 'gemini');
     checks.push({
       name: 'LLM Provider',
       passed: hasLLM,
-      message: hasLLM ? 'Chat/Code provider configured' : 'Missing secret for Anthropic/OpenAI/etc.',
+      message: hasLLM
+        ? `Chat/Code provider configured${hasGemini ? '' : ' — Gemini optional fallback (billing/quota not blocking)'}`
+        : 'Missing secret for Anthropic/OpenAI',
     });
 
     // 2. Make.com Connector
@@ -130,16 +139,32 @@ class SelfBuildOrchestratorService {
       message: makeStatus === 'configured' ? 'Webhook scenarios active' : 'Scenarios not configured',
     });
 
-    // 3. Workspace
+    // 3. Workspace (optional for dry run; required for full autonomous run)
     const activeWs = workspaceController.getActiveWorkspace();
     checks.push({
       name: 'Agent Workspace',
       passed: !!activeWs,
-      message: activeWs ? `Bound to ${activeWs.name}` : 'No active workspace selected',
+      optional: true,
+      message: activeWs
+        ? `Bound to ${activeWs.name}`
+        : 'No active workspace — not required for dry run',
     });
+
+    // 4. Voice providers (optional — not required for self-build)
+    checks.push({
+      name: 'Voice Providers',
+      passed: false,
+      optional: true,
+      message: 'Voice providers planned; not required for self-build dry run. OpenAI voice can use existing OpenAI key through backend-safe session flow.',
+    });
+
+    // Full autonomous run requires all non-optional checks to pass
+    const required = checks.filter(c => !c.optional);
+    const dryRunReady = required.every(c => c.passed);
 
     return {
       ready: checks.every(c => c.passed),
+      dryRunReady,
       checks,
     };
   }
