@@ -28,11 +28,12 @@ export type TTSProviderType =
 // ─── Status ───────────────────────────────────────────────────────────────────
 
 export type VoiceProviderStatus =
-  | 'configured'    // Key present and provider enabled
-  | 'missing_key'   // Env var known but value absent
-  | 'no_key_needed' // Browser built-in
-  | 'planned'       // Not yet implemented
-  | 'disabled';     // Explicitly off
+  | 'secret_configured'
+  | 'missing_secret'
+  | 'dry_run_ready'
+  | 'disabled'
+  | 'planned'
+  | 'no_secret_needed';
 
 // ─── Quality tiers ────────────────────────────────────────────────────────────
 
@@ -77,6 +78,7 @@ export interface VoiceProviderHealth {
     provider: STTProviderType;
     status: VoiceProviderStatus;
     keyEnvVar: string | null;
+    maskedSecretRef?: string;
     hasKey: boolean;
     notes: string;
   };
@@ -84,6 +86,7 @@ export interface VoiceProviderHealth {
     provider: TTSProviderType;
     status: VoiceProviderStatus;
     keyEnvVar: string | null;
+    maskedSecretRef?: string;
     hasKey: boolean;
     notes: string;
   };

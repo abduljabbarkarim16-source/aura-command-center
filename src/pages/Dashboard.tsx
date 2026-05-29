@@ -17,6 +17,7 @@ import {
 import { mockAgents, mockTasks, mockProjects } from '../store/mockData';
 import { FuturePlaceholderCards } from '../components/operator/FuturePlaceholderCards';
 import { ProviderCapabilityCard } from '../components/operator/ProviderCapabilityCard';
+import { SelfBuildReadinessPanel } from '../components/operator/SelfBuildReadinessPanel';
 import { cn } from '../lib/utils';
 
 // ─── Compact section header ───────────────────────────────────────────────────
@@ -257,49 +258,11 @@ export function Dashboard() {
       {/* ── Operational Readiness ────────────────────────────────────── */}
       <div>
         <SectionHeader
-          title="Operational Readiness"
+          title="Self-Build Loop Readiness"
           action="Architecture docs"
           onAction={() => navigate('/settings')}
         />
-        <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-2xl p-5">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {[
-              { icon: <Database className="w-3.5 h-3.5" />,  label: 'Memory Workflow',   status: 'Active',   active: true  },
-              { icon: <ShieldCheck className="w-3.5 h-3.5" />,label: 'Approval Gates',   status: 'Active',   active: true  },
-              { icon: <Workflow className="w-3.5 h-3.5" />,  label: 'Voice Runtime',     status: 'Active',   active: true  },
-              { icon: <Cpu className="w-3.5 h-3.5" />,        label: 'Provider Registry', status: 'Active',   active: true  },
-              { icon: <Terminal className="w-3.5 h-3.5" />,  label: 'Command Runner',    status: 'Planned',  active: false },
-              { icon: <GitBranch className="w-3.5 h-3.5" />, label: 'Git Automation',    status: 'Planned',  active: false },
-            ].map(item => (
-              <div
-                key={item.label}
-                className="flex items-center gap-2.5 px-3 py-2.5 bg-zinc-950/40 border border-zinc-800/40 rounded-xl"
-              >
-                <div className={cn(
-                  'w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0',
-                  item.active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-zinc-800/60 text-zinc-600',
-                )}>
-                  {item.icon}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[12px] font-medium text-zinc-300 truncate">{item.label}</p>
-                  <p className={cn('text-[10px] font-medium', item.active ? 'text-emerald-500' : 'text-zinc-600')}>
-                    {item.status}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 pt-3 border-t border-zinc-800/30 text-[11px] text-zinc-600">
-            Self-build controller and agent router land in Phase 2J.{' '}
-            <button
-              onClick={() => navigate('/settings')}
-              className="text-indigo-500 hover:text-indigo-400 transition-colors"
-            >
-              View architecture docs →
-            </button>
-          </p>
-        </div>
+        <SelfBuildReadinessPanel />
       </div>
 
       {/* ── Roadmap ──────────────────────────────────────────────────── */}

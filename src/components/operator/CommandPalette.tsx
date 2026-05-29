@@ -10,7 +10,7 @@ import {
   Search, Terminal, ArrowRight, X, Workflow, Settings,
   LayoutDashboard, FolderKanban, BrainCircuit, BringToFront,
   Bot, Mic, ShieldCheck, Network, MemoryStick, ChevronRight,
-  Activity, Link2, Eye, Bell,
+  Activity, Link2, Eye, Bell, Webhook
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -37,6 +37,7 @@ const ALL_COMMANDS: Command[] = [
   { id: 'nav-handoffs',   group: 'Navigate',  icon: <BringToFront className="w-4 h-4 text-violet-400" />, title: 'Go to Handoffs',         description: 'Agent handoff tracker',          action: 'navigate', path: '/handoffs'  },
   { id: 'nav-agents',     group: 'Navigate',  icon: <Bot className="w-4 h-4 text-zinc-400" />,            title: 'Go to Agents',           description: 'Agent fleet',                    action: 'navigate', path: '/agents'    },
   { id: 'nav-connectors', group: 'Navigate',  icon: <Link2 className="w-4 h-4 text-zinc-400" />,          title: 'Go to MCP Connectors',   description: 'Connector management',           action: 'navigate', path: '/connectors'},
+  { id: 'nav-make',       group: 'Navigate',  icon: <Webhook className="w-4 h-4 text-indigo-400" />,      title: 'Open Make Connector',    description: 'Make.com scenario settings',     action: 'navigate', path: '/settings'  },
   { id: 'nav-settings',   group: 'Navigate',  icon: <Settings className="w-4 h-4 text-zinc-400" />,       title: 'Go to Settings',         description: 'App configuration',             action: 'navigate', path: '/settings'  },
 
   // Actions
@@ -45,6 +46,7 @@ const ALL_COMMANDS: Command[] = [
   { id: 'act-relay',      group: 'Actions',   icon: <Workflow className="w-4 h-4 text-amber-400" />,      title: 'Create new relay',       description: 'Draft an approval-gated relay packet' },
   { id: 'act-memory',     group: 'Actions',   icon: <MemoryStick className="w-4 h-4 text-sky-400" />,     title: 'Show memory',            description: 'Browse persistent memory entries'  },
   { id: 'act-technical',  group: 'Actions',   icon: <Settings className="w-4 h-4 text-zinc-400" />,       title: 'Toggle technical details', description: 'Open/close the technical drawer'  },
+  { id: 'act-make-dryrun',group: 'Actions',   icon: <Webhook className="w-4 h-4 text-indigo-400" />,      title: 'Dry-run Make payload',   description: 'Test a simulated Make.com webhook' },
 
   // System
   { id: 'sys-voice',      group: 'System',    icon: <Mic      className="w-4 h-4 text-rose-400" />,        title: 'Start voice mode',           description: 'Activate voice input'                      },

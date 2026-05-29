@@ -27,6 +27,8 @@ import { useAppSettings } from '../hooks/useAppSettings';
 import { settingsService } from '../services/settings/SettingsService';
 import type { AppSettings, ProviderConfig } from '../types/settings';
 import type { KeyStorageStatus } from '../types/settings';
+import { MakeConnectorCard } from '../components/connectors/MakeConnectorCard';
+import { SecureKeysCard } from '../components/security/SecureKeysCard';
 
 // ---------------------------------------------------------------------------
 // Helper components
@@ -531,6 +533,11 @@ export function Settings() {
         </div>
       </CollapsibleSection>
 
+      {/* ── Secure Keys ── */}
+      <div>
+        <SecureKeysCard />
+      </div>
+
       {/* ── Memory ── */}
       <CollapsibleSection
         icon={<BrainCircuit className="w-5 h-5" />}
@@ -624,6 +631,11 @@ export function Settings() {
       {/* ── Provider Capability Audit ── */}
       <div>
         <ProviderCapabilityCard />
+      </div>
+
+      {/* ── Make.com Connector ── */}
+      <div>
+        <MakeConnectorCard />
       </div>
 
       {/* ── Import / Export ── */}

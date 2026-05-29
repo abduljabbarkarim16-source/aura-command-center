@@ -99,7 +99,7 @@ class ProviderAdapterService {
   /** Checks only key presence — never reads the value */
   checkConfigured(providerType: string): boolean {
     const health = providerRegistry.getHealth(providerType);
-    return health?.status === 'configured';
+    return health?.status === 'secret_configured';
   }
 
   validateConfig(providerType: string): { valid: boolean; issues: string[] } {
@@ -223,7 +223,9 @@ class ProviderAdapterService {
 
   /** Simulate a dry-run response (no real call) */
   simulateDryRunResponse(request: ProviderRequest): ProviderResponse {
-    const configured = this.checkConfigured(request.providerId.replace('provider-', ''));
+    const health = providerRegistry.getHealth(request.providerId.replace('provider-', ''));
+    const status = health?.status;
+    const configured = status === 'secret_configured' || status === 'dry_run_ready';
     return {
       providerId: request.providerId,
       success: configured,

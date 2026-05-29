@@ -287,6 +287,23 @@ class CommandPolicyService {
     ].filter(Boolean).join('\n');
   }
 
+  evaluateAutonomousExecution(command: string, hasPlanApproval: boolean = false): { permitted: boolean; reason: string } {
+    const d = this.classifyCommand(command);
+    if (d.blocked) {
+      return { permitted: false, reason: 'Command is strictly blocked by policy.' };
+    }
+    if (d.canAutoRun) {
+      return { permitted: true, reason: 'Command is safe and requires no approval.' };
+    }
+    if (hasPlanApproval) {
+      if (d.approvalRequirement === 'admin_only') {
+         return { permitted: false, reason: 'Command requires explicit admin runtime approval, plan approval is insufficient.' };
+      }
+      return { permitted: true, reason: 'Command requires approval, and plan approval was granted.' };
+    }
+    return { permitted: false, reason: 'Command requires approval but no plan approval is active.' };
+  }
+
   listPolicies(): CommandPattern[] {
     return [...this.customPatterns, ...PATTERNS];
   }

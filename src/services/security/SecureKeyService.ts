@@ -29,9 +29,11 @@ const KNOWN_PROVIDERS = [
   { name: 'openai-api-key', provider: 'openai' },
   { name: 'anthropic-api-key', provider: 'anthropic' },
   { name: 'google-ai-api-key', provider: 'google' },
+  { name: 'elevenlabs-api-key', provider: 'elevenlabs' },
   { name: 'groq-api-key', provider: 'groq' },
   { name: 'deepseek-api-key', provider: 'deepseek' },
   { name: 'mistral-api-key', provider: 'mistral' },
+  { name: 'antigravity-api-key', provider: 'antigravity' },
 ] as const;
 
 /** Valid key name pattern: lowercase alphanumeric + hyphens, 3-64 chars */
