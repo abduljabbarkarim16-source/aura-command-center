@@ -21,7 +21,8 @@ export type MakeScenarioEvent =
   | 'handoff_created'
   | 'build_completed'
   | 'phase3_connection_test'
-  | 'phase3b_self_build_dry_run_completed';
+  | 'phase3b_self_build_dry_run_completed'
+  | 'phase3c_voice_conversation_test_completed';
 
 export interface MakeScenarioTrigger {
   events: MakeScenarioEvent[];

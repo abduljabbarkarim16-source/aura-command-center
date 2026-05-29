@@ -1,136 +1,182 @@
 /**
- * OpenAIVoiceSessionService — AURA Phase 3B
+ * OpenAIVoiceSessionService — AURA Phase 3C
  *
- * Handles OpenAI-based voice operations:
- *   - Request-based STT via Whisper (/v1/audio/transcriptions)
- *   - Request-based TTS (/v1/audio/speech)
- *   - Future: ephemeral client-secret creation for OpenAI Realtime WebRTC
+ * Orchestrates OpenAI STT → Chat → TTS via the Tauri backend.
  *
  * Security architecture:
- * - In a production Tauri app, the OpenAI key must NOT be used from the frontend
- *   for Realtime sessions (the ephemeral token endpoint requires server auth).
- * - For request-based STT/TTS, the key is read from VITE_OPENAI_API_KEY
- *   and used only in the Tauri WebView fetch — no value is logged or stored.
- * - For Realtime, a backend/Tauri command bridge must mint the ephemeral token
- *   and return only the token to the frontend.
+ * - All OpenAI calls go through Tauri backend commands (voice_commands.rs)
+ * - The API key is held in Rust; never returned to the frontend
+ * - Audio bytes are sent to Rust via invoke(); only text is returned
+ * - TTS audio bytes come back from Rust; converted to Blob URL locally
+ * - Object URLs are revoked by the caller after playback
+ * - Conversation history in memory only; not persisted unless user enables it
  *
- * Current Phase 3B status:
- * - STT and TTS stubs are wired (dry-run capable, live call architecturally correct)
- * - Realtime session creation is stubbed (returns mock token)
- * - No audio is sent yet — microphone not opened
- * - Live calls require explicit approval gate
+ * Provider: OpenAI for all three (STT/Chat/TTS) — simplest MVP path.
+ * Anthropic can be added for the chat step in a future pass.
  */
 
+import { invoke } from '@tauri-apps/api/core';
 import type {
+  VoiceTranscriptionResult,
+  VoiceChatResult,
+  VoiceSpeechResult,
+  VoiceConversationTurn,
+  VoiceConversationSettings,
   OpenAIRealtimeSessionRequest,
   OpenAIRealtimeSessionResponse,
 } from '../../types/voice-session';
 
-// ─── Response types ───────────────────────────────────────────────────────────
+// ─── History message shape (matches Rust ChatMessage) ─────────────────────────
 
-export interface OpenAITranscriptionResult {
-  success: boolean;
-  text?: string;
-  language?: string;
-  durationMs?: number;
-  error?: string;
-  isDryRun: boolean;
+interface ChatHistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
 }
 
-export interface OpenAITTSResult {
-  success: boolean;
-  audioBlobUrl?: string;  // Object URL — caller must revoke after use
-  durationEstimateMs?: number;
-  error?: string;
-  isDryRun: boolean;
-}
+const MAX_HISTORY_TURNS = 5;
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 class OpenAIVoiceSessionServiceImpl {
+  private history: ChatHistoryMessage[] = [];
 
-  // ── Readiness check (no key value printed) ────────────────────────────────
+  // ── Readiness check ───────────────────────────────────────────────────────
 
   isReady(): boolean {
     return Boolean(import.meta.env.VITE_OPENAI_API_KEY);
   }
 
-  // ── STT: Whisper transcription ────────────────────────────────────────────
-  // Accepts an audio Blob (from MediaRecorder or a file).
-  // In Phase 3B: dry-run returns a mock transcript.
-  // In Phase 3 live: sends real audio blob to /v1/audio/transcriptions.
+  // ── STT: transcribe audio via Tauri backend ───────────────────────────────
 
-  async transcribeAudio(audioBlob: Blob, dryRun = true): Promise<OpenAITranscriptionResult> {
+  async transcribeAudio(audioBlob: Blob): Promise<VoiceTranscriptionResult> {
     if (!this.isReady()) {
-      return { success: false, error: 'OpenAI key not configured', isDryRun: dryRun };
+      return { success: false, error: 'OpenAI key not configured' };
     }
-    if (dryRun) {
-      return { success: true, text: '[DRY-RUN transcript placeholder]', isDryRun: true };
-    }
-
-    const key: string = import.meta.env.VITE_OPENAI_API_KEY;
-    const form = new FormData();
-    form.append('file', audioBlob, 'audio.webm');
-    form.append('model', 'whisper-1');
-
     const start = Date.now();
     try {
-      const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${key}` },
-        body: form,
+      // Convert blob to byte array for Tauri transfer
+      const buffer = await audioBlob.arrayBuffer();
+      const audioBytes = Array.from(new Uint8Array(buffer));
+      const contentType = audioBlob.type || 'audio/webm';
+
+      const text = await invoke<string>('openai_transcribe_audio', {
+        audioBytes,
+        contentType,
       });
-      const data: Record<string, unknown> = await res.json() as Record<string, unknown>;
-      if (!res.ok) {
-        const msg = (data.error as { message?: string } | undefined)?.message ?? `HTTP ${res.status}`;
-        return { success: false, error: msg, isDryRun: false };
-      }
-      return {
-        success: true,
-        text: (data.text as string | undefined)?.trim(),
-        durationMs: Date.now() - start,
-        isDryRun: false,
-      };
+
+      return { success: true, text: text.trim(), latencyMs: Date.now() - start };
     } catch (err) {
-      return { success: false, error: String(err), isDryRun: false };
+      return { success: false, error: String(err), latencyMs: Date.now() - start };
     }
   }
 
-  // ── TTS: OpenAI text-to-speech ────────────────────────────────────────────
-  // In Phase 3B: dry-run only — no audio generated.
-  // In Phase 3 live: sends text to /v1/audio/speech, returns audio blob URL.
+  // ── Chat: get AURA response via Tauri backend ─────────────────────────────
 
-  async synthesizeSpeech(text: string, voice = 'alloy', dryRun = true): Promise<OpenAITTSResult> {
-    if (!this.isReady()) {
-      return { success: false, error: 'OpenAI key not configured', isDryRun: dryRun };
-    }
-    if (dryRun) {
-      return { success: true, isDryRun: true, durationEstimateMs: text.length * 50 };
-    }
-
-    const key: string = import.meta.env.VITE_OPENAI_API_KEY;
+  async createChatResponse(transcript: string): Promise<VoiceChatResult> {
+    if (!transcript.trim()) return { success: false, error: 'Empty transcript' };
+    const start = Date.now();
     try {
-      const res = await fetch('https://api.openai.com/v1/audio/speech', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'tts-1', input: text, voice }),
+      // Send last N turns as history
+      const historySlice = this.history.slice(-MAX_HISTORY_TURNS * 2);
+
+      const text = await invoke<string>('openai_chat_response', {
+        transcript: transcript.trim(),
+        history: historySlice,
       });
-      if (!res.ok) {
-        const data: Record<string, unknown> = await res.json() as Record<string, unknown>;
-        const msg = (data.error as { message?: string } | undefined)?.message ?? `HTTP ${res.status}`;
-        return { success: false, error: msg, isDryRun: false };
+
+      // Store this turn in history
+      this.history.push({ role: 'user', content: transcript.trim() });
+      this.history.push({ role: 'assistant', content: text });
+      if (this.history.length > MAX_HISTORY_TURNS * 2) {
+        this.history = this.history.slice(-MAX_HISTORY_TURNS * 2);
       }
-      const blob = await res.blob();
-      return { success: true, audioBlobUrl: URL.createObjectURL(blob), isDryRun: false };
+
+      return { success: true, text: text.trim(), latencyMs: Date.now() - start };
     } catch (err) {
-      return { success: false, error: String(err), isDryRun: false };
+      return { success: false, error: String(err), latencyMs: Date.now() - start };
     }
   }
 
-  // ── Realtime session (future — ephemeral token) ───────────────────────────
-  // The real implementation requires a server/Tauri bridge that holds the API key
-  // server-side and mints a short-lived client secret.
-  // Phase 3B: returns a mock session for architecture testing only.
+  // ── TTS: synthesize speech via Tauri backend ──────────────────────────────
+
+  async synthesizeSpeech(
+    text: string,
+    voice: VoiceConversationSettings['ttsVoice'] = 'alloy',
+  ): Promise<VoiceSpeechResult> {
+    if (!text.trim()) return { success: false, error: 'Empty text' };
+    const start = Date.now();
+    try {
+      const audioBytes = await invoke<number[]>('openai_synthesize_speech', {
+        text: text.trim(),
+        voice,
+      });
+
+      const blob = new Blob([new Uint8Array(audioBytes)], { type: 'audio/mpeg' });
+      const audioBlobUrl = URL.createObjectURL(blob);
+
+      return { success: true, audioBlobUrl, latencyMs: Date.now() - start };
+    } catch (err) {
+      return { success: false, error: String(err), latencyMs: Date.now() - start };
+    }
+  }
+
+  // ── Full conversation turn ────────────────────────────────────────────────
+
+  async runConversationTurn(
+    audioBlob: Blob,
+    settings: VoiceConversationSettings,
+  ): Promise<{ success: boolean; turn?: VoiceConversationTurn; audioUrl?: string; error?: string }> {
+    // STT
+    const sttResult = await this.transcribeAudio(audioBlob);
+    if (!sttResult.success || !sttResult.text) {
+      return { success: false, error: sttResult.error ?? 'Transcription failed' };
+    }
+
+    // Chat
+    const chatResult = await this.createChatResponse(sttResult.text);
+    if (!chatResult.success || !chatResult.text) {
+      return { success: false, error: chatResult.error ?? 'Chat failed' };
+    }
+
+    // TTS
+    const ttsResult = await this.synthesizeSpeech(chatResult.text, settings.ttsVoice);
+    if (!ttsResult.success) {
+      // Return text even if TTS fails — user can read the response
+      const turn: VoiceConversationTurn = {
+        id: `turn-${Date.now()}`,
+        userText: sttResult.text,
+        auraText: chatResult.text,
+        timestamp: new Date().toISOString(),
+        sttLatencyMs: sttResult.latencyMs,
+        chatLatencyMs: chatResult.latencyMs,
+      };
+      return { success: true, turn, error: `TTS failed: ${ttsResult.error}` };
+    }
+
+    const turn: VoiceConversationTurn = {
+      id: `turn-${Date.now()}`,
+      userText: sttResult.text,
+      auraText: chatResult.text,
+      timestamp: new Date().toISOString(),
+      sttLatencyMs: sttResult.latencyMs,
+      chatLatencyMs: chatResult.latencyMs,
+      ttsLatencyMs: ttsResult.latencyMs,
+    };
+
+    return { success: true, turn, audioUrl: ttsResult.audioBlobUrl };
+  }
+
+  // ── History management ────────────────────────────────────────────────────
+
+  clearHistory() {
+    this.history = [];
+  }
+
+  getHistoryLength(): number {
+    return this.history.length / 2;
+  }
+
+  // ── Realtime stub (future) ────────────────────────────────────────────────
 
   async createRealtimeSession(
     _req: OpenAIRealtimeSessionRequest,
@@ -145,19 +191,15 @@ class OpenAIVoiceSessionServiceImpl {
           object: 'realtime.session',
           model: 'gpt-4o-realtime-preview',
           client_secret: {
-            value: '[MOCK_EPHEMERAL_TOKEN — never used in dry run]',
+            value: '[MOCK_EPHEMERAL_TOKEN]',
             expires_at: Math.floor(Date.now() / 1000) + 60,
           },
         },
       };
     }
-
-    // Production path: delegate to a Tauri command that calls the endpoint
-    // server-side and returns only the ephemeral token.
-    // This prevents the API key from being used in the browser for session creation.
     return {
       success: false,
-      error: 'Realtime session creation requires a Tauri backend bridge — not yet implemented.',
+      error: 'Realtime session requires Tauri backend bridge — not yet implemented.',
       isDryRun: false,
     };
   }
