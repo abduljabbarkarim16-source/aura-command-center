@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "AURA Command Center",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "identifier": "com.aura.commandcenter",
   "build": {
     "frontendDist": "../dist",
