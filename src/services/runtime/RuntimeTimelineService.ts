@@ -169,7 +169,7 @@ class RuntimeTimelineService {
     this.unsubscribeFromRuntime = voiceRuntimeService.subscribe(snapshot => {
       const recent = snapshot.recentEvents.slice(0, 1); // Only new events (newest first)
       for (const event of recent) {
-        if (!this.events.some(e => e.entityId === event.id || e.id.includes(event.id.slice(0, 8)))) {
+        if (!this.events.some(e => e.entityId === event.id)) {
           const tl = mapVoiceEventToTimeline(event);
           if (tl) this.addEvent(tl);
         }

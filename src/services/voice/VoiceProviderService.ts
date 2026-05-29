@@ -24,16 +24,16 @@ import type {
 
 // ─── Env var mapping ──────────────────────────────────────────────────────────
 
-const STT_KEY_MAP: Partial<Record<STTProviderType, string>> = {
+const STT_KEY_MAP: Partial<Record<STTProviderType, string | undefined>> = {
   'openai-whisper':  'VITE_OPENAI_API_KEY',
   'openai-realtime': 'VITE_OPENAI_REALTIME_KEY',
-  'browser-speech-api': null as never, // No key needed
+  'browser-speech-api': undefined, // No key needed
 };
 
-const TTS_KEY_MAP: Partial<Record<TTSProviderType, string>> = {
+const TTS_KEY_MAP: Partial<Record<TTSProviderType, string | undefined>> = {
   'openai-tts':          'VITE_OPENAI_API_KEY',
   'elevenlabs':          'VITE_ELEVENLABS_API_KEY',
-  'browser-speech-synth': null as never, // No key needed
+  'browser-speech-synth': undefined, // No key needed
 };
 
 // ─── Service ──────────────────────────────────────────────────────────────────

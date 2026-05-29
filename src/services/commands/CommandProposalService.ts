@@ -45,6 +45,31 @@ class CommandProposalService {
   private listeners = new Set<QueueListener>();
   private readonly MAX_PROPOSALS = 100;
 
+  /** Maps VoiceRuntime approval IDs → proposal IDs for approval correlation */
+  private approvalMap = new Map<string, string>();
+
+  constructor() {
+    // Subscribe to VoiceRuntime to catch approval resolutions and correlate them
+    // back to the originating command proposal.
+    voiceRuntimeService.subscribe(snapshot => {
+      for (const event of snapshot.recentEvents) {
+        if (event.type === 'approval_resolved' && event.payload?.id) {
+          const approvalId = event.payload.id as string;
+          const proposalId = this.approvalMap.get(approvalId);
+          if (proposalId) {
+            const decision = event.payload.decision as string;
+            if (decision === 'approved') {
+              this.approveProposal(proposalId);
+            } else {
+              this.rejectProposal(proposalId, 'Rejected via voice approval');
+            }
+            this.approvalMap.delete(approvalId);
+          }
+        }
+      }
+    });
+  }
+
   // ── Subscription ──────────────────────────────────────────────────────────
 
   subscribe(fn: QueueListener): () => void {
@@ -247,7 +272,7 @@ class CommandProposalService {
       this.proposals = this.proposals.map(p =>
         p.id === proposal.id ? { ...p, status: 'pending_approval' } : p,
       );
-      voiceRuntimeService.requestApproval({
+      const approval = voiceRuntimeService.requestApproval({
         title: `Run: ${proposal.command}`,
         summary: proposal.reason,
         riskLevel: proposal.riskClass === 'high' ? 'high' : 'medium',
@@ -255,6 +280,8 @@ class CommandProposalService {
         sourceAgent: proposal.proposedBy,
         targetAgent: 'workspace-shell',
       });
+      // Store correlation so approval resolution flows back to this proposal
+      this.approvalMap.set(approval.id, proposal.id);
     } else {
       // Soft approval — just show notification
       notificationService.add({

@@ -108,7 +108,6 @@ class SelfBuildOrchestratorService {
     const branchName = gitAutomationService.createSelfBuildBranchName(
       goal.title.slice(0, 40).toLowerCase().replace(/\s+/g, '-'),
     );
-    const routing = agentRouter.route(goal.description);
 
     // Every plan has these standard milestones
     milestones.push(this.createMilestone(goal.id, 1, 'Preparation', [
@@ -248,7 +247,7 @@ class SelfBuildOrchestratorService {
       milestoneId: uid(),
       lintPassed: null,
       buildPassed: null,
-      tauriBuildPassed: isDeploymentMilestone ? null : undefined as never,
+      tauriBuildPassed: isDeploymentMilestone ? null : undefined,
       manualCheckRequired: isDeploymentMilestone,
       notes: [],
       checklist: [
@@ -313,10 +312,13 @@ class SelfBuildOrchestratorService {
   private createMilestone(
     planId: string, order: number, title: string, tasks: SelfBuildTask[],
   ): SelfBuildMilestone {
+    const milestoneId = uid();
+    // Back-patch tasks with the milestone ID and sequential order
+    const patchedTasks = tasks.map((t, i) => ({ ...t, milestoneId, order: i + 1 }));
     return {
-      id: uid(), planId, order, title,
+      id: milestoneId, planId, order, title,
       description: `Milestone ${order}: ${title}`,
-      tasks, approvalGates: [], status: 'pending',
+      tasks: patchedTasks, approvalGates: [], status: 'pending',
     };
   }
 

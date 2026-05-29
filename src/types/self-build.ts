@@ -97,7 +97,7 @@ export interface SelfBuildValidationResult {
   milestoneId: string;
   lintPassed: boolean | null;
   buildPassed: boolean | null;
-  tauriBuildPassed: boolean | null;
+  tauriBuildPassed: boolean | null | undefined;
   manualCheckRequired: boolean;
   notes: string[];
   checklist: Array<{ item: string; done: boolean }>;
