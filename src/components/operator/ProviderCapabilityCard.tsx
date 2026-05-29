@@ -1,116 +1,25 @@
 /**
- * ProviderCapabilityCard — Phase 2E Deep Refinement
+ * ProviderCapabilityCard — Phase 2E Deep Refinement & Phase 2G Update
  *
  * Displays which AI providers have environment keys present.
  * SAFETY RULES:
  *  - Only checks for key PRESENCE (truthy check), never displays values
  *  - Never logs, stores, or transmits key values
  *  - Never runs paid API calls
- *  - Shows only CONFIGURED / UNCONFIGURED status
+ *  - Uses providerRegistry for source of truth
  */
 
-import React, { Fragment } from 'react';
+import React, { Fragment, useEffect, useState } from 'react';
 import {
   CheckCircle2, XCircle, Lock, Network, BrainCircuit,
   Sparkles, Bot, Orbit, MessageSquare, Volume2, Mic2, Radio,
+  Play
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-
-// ─── Provider definitions ─────────────────────────────────────────────────────
-
-interface ProviderDef {
-  id: string;
-  name: string;
-  icon: React.ReactNode;
-  envKey: string | null;     // null = no key needed
-  tier: 'active' | 'planned' | 'concept';
-  note?: string;
-}
-
-const PROVIDERS: ProviderDef[] = [
-  {
-    id: 'anthropic',
-    name: 'Anthropic / Claude',
-    icon: <Sparkles className="w-4 h-4 text-indigo-400" />,
-    envKey: 'VITE_ANTHROPIC_API_KEY',
-    tier: 'active',
-  },
-  {
-    id: 'openai',
-    name: 'OpenAI / Codex',
-    icon: <Bot className="w-4 h-4 text-emerald-400" />,
-    envKey: 'VITE_OPENAI_API_KEY',
-    tier: 'active',
-  },
-  {
-    id: 'gemini',
-    name: 'Google / Gemini',
-    icon: <BrainCircuit className="w-4 h-4 text-sky-400" />,
-    envKey: 'VITE_GOOGLE_API_KEY',
-    tier: 'active',
-  },
-  {
-    id: 'chatgpt-relay',
-    name: 'ChatGPT Relay',
-    icon: <MessageSquare className="w-4 h-4 text-amber-400" />,
-    envKey: null,
-    tier: 'active',
-    note: 'Clipboard-based — no API key needed',
-  },
-  {
-    id: 'antigravity',
-    name: 'Antigravity',
-    icon: <Orbit className="w-4 h-4 text-violet-400" />,
-    envKey: 'VITE_ANTIGRAVITY_API_KEY',
-    tier: 'active',
-  },
-  {
-    id: 'oracle',
-    name: 'Oracle / OpenClaude',
-    icon: <Network className="w-4 h-4 text-zinc-500" />,
-    envKey: null,
-    tier: 'concept',
-    note: 'Deep reasoning synthesis agent — planned',
-  },
-
-  // ── Voice providers — planned for Phase 3 ────────────────────────────────
-  {
-    id: 'elevenlabs',
-    name: 'ElevenLabs TTS',
-    icon: <Volume2 className="w-4 h-4 text-zinc-500" />,
-    envKey: 'VITE_ELEVENLABS_API_KEY',
-    tier: 'planned',
-    note: 'High-quality neural voice — Phase 3',
-  },
-  {
-    id: 'voice-stt',
-    name: 'Voice STT Provider',
-    icon: <Mic2 className="w-4 h-4 text-zinc-500" />,
-    envKey: null,
-    tier: 'planned',
-    note: 'OpenAI Whisper · browser SpeechRecognition — Phase 3',
-  },
-  {
-    id: 'voice-realtime',
-    name: 'OpenAI Realtime Voice',
-    icon: <Radio className="w-4 h-4 text-zinc-500" />,
-    envKey: 'VITE_OPENAI_REALTIME_KEY',
-    tier: 'concept',
-    note: 'Full-duplex WebRTC voice channel — Phase 3',
-  },
-];
-
-// ─── Safely check key presence only ──────────────────────────────────────────
-
-function isKeyPresent(envKey: string): boolean {
-  // Only check presence (truthy), never expose value
-  try {
-    const val = (import.meta.env as Record<string, unknown>)[envKey];
-    return Boolean(val && String(val).length > 0 && String(val) !== 'undefined');
-  } catch {
-    return false;
-  }
-}
+import { providerRegistry } from '../../services/providers/ProviderRegistryService';
+import { providerAdapterService } from '../../services/providers/ProviderAdapterService';
+import { secureKeyService } from '../../services/security/SecureKeyService';
+import type { ProviderHealth } from '../../types/providers';
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -120,12 +29,38 @@ interface ProviderCapabilityCardProps {
 }
 
 export function ProviderCapabilityCard({ className, compact = false }: ProviderCapabilityCardProps) {
-  const activeProviders = PROVIDERS.filter(p => p.tier === 'active');
-  const plannedProviders = PROVIDERS.filter(p => p.tier !== 'active');
+  const [providers, setProviders] = useState<ProviderHealth[]>([]);
+  const [dryRunResults, setDryRunResults] = useState<Record<string, string>>({});
 
-  const configuredCount = activeProviders.filter(p =>
-    p.envKey === null || isKeyPresent(p.envKey)
+  useEffect(() => {
+    // Initial load
+    setProviders(providerRegistry.getAll());
+
+    // Subscribe to secureKeyService changes
+    const unsub = secureKeyService.subscribe(() => {
+      setProviders(providerRegistry.getAll());
+    });
+    return unsub;
+  }, []);
+
+  const activeProviders = providers.filter(p => p.status !== 'planned' && p.status !== 'unavailable');
+  const plannedProviders = providers.filter(p => p.status === 'planned' || p.status === 'unavailable');
+
+  const configuredCount = activeProviders.filter(p => 
+    p.status === 'secret_configured' || p.status === 'dry_run_ready'
   ).length;
+
+  const handleDryRun = (providerType: string) => {
+    const res = providerAdapterService.dryRun(providerType);
+    setDryRunResults(prev => ({ ...prev, [providerType]: res.wouldSucceed ? 'Dry-run OK' : 'Dry-run Failed' }));
+    setTimeout(() => {
+      setDryRunResults(prev => {
+        const next = { ...prev };
+        delete next[providerType];
+        return next;
+      });
+    }, 3000);
+  };
 
   return (
     <div className={cn('bg-zinc-900/50 border border-zinc-800/60 rounded-2xl overflow-hidden', className)}>
@@ -141,28 +76,26 @@ export function ProviderCapabilityCard({ className, compact = false }: ProviderC
         </div>
         <span className={cn(
           'px-2.5 py-1 rounded-full text-[11px] font-semibold border',
-          configuredCount === activeProviders.length
+          configuredCount === activeProviders.length && activeProviders.length > 0
             ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
             : 'bg-amber-500/10 border-amber-500/25 text-amber-400'
         )}>
-          {configuredCount === activeProviders.length ? 'All ready' : `${activeProviders.length - configuredCount} unconfigured`}
+          {configuredCount === activeProviders.length && activeProviders.length > 0 ? 'All ready' : `${activeProviders.length - configuredCount} unconfigured`}
         </span>
       </div>
 
       {/* Active providers */}
       <div className={cn('divide-y divide-zinc-800/30', compact ? '' : 'p-1')}>
-        {activeProviders.map(provider => {
-          const configured = provider.envKey === null || isKeyPresent(provider.envKey);
-          return (
-            <Fragment key={provider.id}>
-              <ProviderRow
-                provider={provider}
-                configured={configured}
-                compact={compact}
-              />
-            </Fragment>
-          );
-        })}
+        {activeProviders.map(provider => (
+          <Fragment key={provider.id}>
+            <ProviderRow
+              provider={provider}
+              compact={compact}
+              dryRunResult={dryRunResults[provider.providerType]}
+              onDryRun={() => handleDryRun(provider.providerType)}
+            />
+          </Fragment>
+        ))}
       </div>
 
       {/* Planned / concept providers */}
@@ -178,7 +111,6 @@ export function ProviderCapabilityCard({ className, compact = false }: ProviderC
               <Fragment key={provider.id}>
                 <ProviderRow
                   provider={provider}
-                  configured={false}
                   compact={compact}
                   isPlanned
                 />
@@ -192,7 +124,7 @@ export function ProviderCapabilityCard({ className, compact = false }: ProviderC
       <div className="flex items-center gap-2 px-5 py-3 border-t border-zinc-800/30 bg-zinc-950/20">
         <Lock className="w-3 h-3 text-zinc-600 flex-shrink-0" />
         <p className="text-[10px] text-zinc-600 leading-relaxed">
-          Keys are read from environment at runtime. Values are never stored in localStorage, source code, or logs.
+          Keys are read securely from the vault or environment. Values are never stored in localStorage, source code, or logs.
         </p>
       </div>
     </div>
@@ -201,17 +133,36 @@ export function ProviderCapabilityCard({ className, compact = false }: ProviderC
 
 // ─── ProviderRow ──────────────────────────────────────────────────────────────
 
+function getProviderIcon(type: string) {
+  switch (type) {
+    case 'anthropic': return <Sparkles className="w-4 h-4 text-indigo-400" />;
+    case 'openai': return <Bot className="w-4 h-4 text-emerald-400" />;
+    case 'gemini': return <BrainCircuit className="w-4 h-4 text-sky-400" />;
+    case 'chatgpt-relay': return <MessageSquare className="w-4 h-4 text-amber-400" />;
+    case 'antigravity': return <Orbit className="w-4 h-4 text-violet-400" />;
+    case 'oracle': return <Network className="w-4 h-4 text-zinc-500" />;
+    case 'elevenlabs': return <Volume2 className="w-4 h-4 text-zinc-500" />;
+    case 'voice-stt': return <Mic2 className="w-4 h-4 text-zinc-500" />;
+    case 'openai-realtime': return <Radio className="w-4 h-4 text-zinc-500" />;
+    default: return <Bot className="w-4 h-4 text-zinc-400" />;
+  }
+}
+
 function ProviderRow({
   provider,
-  configured,
   compact,
   isPlanned = false,
+  dryRunResult,
+  onDryRun
 }: {
-  provider: ProviderDef;
-  configured: boolean;
+  provider: ProviderHealth;
   compact: boolean;
   isPlanned?: boolean;
+  dryRunResult?: string;
+  onDryRun?: () => void;
 }) {
+  const isConfigured = provider.status === 'secret_configured' || provider.status === 'dry_run_ready';
+
   return (
     <div className={cn(
       'flex items-center justify-between gap-3 px-5 transition-colors',
@@ -221,44 +172,54 @@ function ProviderRow({
       {/* Left: icon + name */}
       <div className="flex items-center gap-3 min-w-0">
         <div className="flex-shrink-0 w-7 h-7 rounded-lg bg-zinc-800/60 border border-zinc-700/30 flex items-center justify-center">
-          {provider.icon}
+          {getProviderIcon(provider.providerType)}
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex flex-col">
           <span className={cn(
             'block text-[13px] font-medium truncate',
             isPlanned ? 'text-zinc-600' : 'text-zinc-300',
           )}>
-            {provider.name}
+            {provider.displayName}
           </span>
-          {provider.note && (
-            <span className="block text-[11px] text-zinc-600 truncate">{provider.note}</span>
-          )}
-          {!provider.note && provider.envKey && (
-            <span className="block text-[10px] text-zinc-700 font-mono truncate">{provider.envKey}</span>
-          )}
+          <span className="block text-[10px] text-zinc-600 font-mono truncate mt-0.5">
+            {provider.maskedSecretRef || (provider.keyEnvVar ? `ENV::${provider.keyEnvVar}` : 'No secret required')}
+          </span>
         </div>
       </div>
 
-      {/* Right: status */}
-      <div className="flex-shrink-0">
+      {/* Right: status and actions */}
+      <div className="flex items-center gap-3 flex-shrink-0">
+        {dryRunResult && (
+           <span className={cn("text-[10px] px-1.5 py-0.5 rounded", dryRunResult.includes('OK') ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
+             {dryRunResult}
+           </span>
+        )}
+        
         {isPlanned ? (
           <span className="px-2 py-0.5 bg-zinc-800/60 border border-zinc-700/40 text-zinc-600 text-[10px] font-semibold rounded-full uppercase tracking-wide">
-            {provider.tier}
+            PLANNED
           </span>
-        ) : provider.envKey === null ? (
+        ) : provider.keyEnvVar === null ? (
           <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
             <CheckCircle2 className="w-3.5 h-3.5" />
             Ready
           </span>
-        ) : configured ? (
-          <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            Configured
-          </span>
+        ) : isConfigured ? (
+          <div className="flex items-center gap-2">
+            {onDryRun && (
+               <button onClick={onDryRun} className="text-zinc-500 hover:text-indigo-400 p-1 rounded" title="Dry-run adapter">
+                 <Play className="w-3.5 h-3.5" />
+               </button>
+            )}
+            <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Secret Found
+            </span>
+          </div>
         ) : (
           <span className="flex items-center gap-1 text-[11px] font-semibold text-zinc-600">
             <XCircle className="w-3.5 h-3.5" />
-            Not set
+            Missing Secret
           </span>
         )}
       </div>

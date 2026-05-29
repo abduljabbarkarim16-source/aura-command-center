@@ -21,6 +21,7 @@ import type {
   VoiceSynthesisRequest,
   VoiceTranscriptionRequest,
 } from '../../types/voice-provider';
+import { secureKeyService } from '../security/SecureKeyService';
 
 // ─── Env var mapping ──────────────────────────────────────────────────────────
 
@@ -36,6 +37,16 @@ const TTS_KEY_MAP: Partial<Record<TTSProviderType, string | undefined>> = {
   'browser-speech-synth': undefined, // No key needed
 };
 
+const STT_SECURE_MAP: Partial<Record<STTProviderType, string>> = {
+  'openai-whisper': 'openai',
+  'openai-realtime': 'openai', // Might be separate depending on user config, but fallback is openai
+};
+
+const TTS_SECURE_MAP: Partial<Record<TTSProviderType, string>> = {
+  'openai-tts': 'openai',
+  'elevenlabs': 'elevenlabs',
+};
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 class VoiceProviderService {
@@ -44,7 +55,8 @@ class VoiceProviderService {
 
   // ── Key presence check (never reads value) ────────────────────────────────
 
-  private hasKey(envVar: string | null | undefined): boolean {
+  private hasKey(secureProvider: string | undefined, envVar: string | null | undefined): boolean {
+    if (secureProvider && secureKeyService.getKeyStatus(secureProvider) === 'stored') return true;
     if (!envVar) return false;
     return Boolean((import.meta.env as Record<string, unknown>)[envVar]);
   }
@@ -55,16 +67,16 @@ class VoiceProviderService {
     if (provider === 'none') return 'disabled';
     if (provider === 'browser-speech-api') return 'planned'; // Not yet implemented
     const keyVar = STT_KEY_MAP[provider];
-    if (!keyVar) return 'no_key_needed';
-    return this.hasKey(keyVar) ? 'configured' : 'missing_key';
+    if (!keyVar) return 'no_secret_needed';
+    return this.hasKey(STT_SECURE_MAP[provider], keyVar) ? 'secret_configured' : 'missing_secret';
   }
 
   getTTSStatus(provider: TTSProviderType): VoiceProviderStatus {
     if (provider === 'none') return 'disabled';
     if (provider === 'browser-speech-synth') return 'planned'; // Not yet enabled
     const keyVar = TTS_KEY_MAP[provider];
-    if (!keyVar) return 'no_key_needed';
-    return this.hasKey(keyVar) ? 'configured' : 'missing_key';
+    if (!keyVar) return 'no_secret_needed';
+    return this.hasKey(TTS_SECURE_MAP[provider], keyVar) ? 'secret_configured' : 'missing_secret';
   }
 
   listSTTProviders(): Array<{ provider: STTProviderType; status: VoiceProviderStatus; keyEnvVar: string | null }> {
@@ -89,26 +101,31 @@ class VoiceProviderService {
     const bestSTT = this.getBestSTTProvider();
     const bestTTS = this.getBestTTSProvider();
 
+    const sttKeyEnvVar = STT_KEY_MAP[bestSTT] ?? null;
+    const ttsKeyEnvVar = TTS_KEY_MAP[bestTTS] ?? null;
+
     return {
       stt: {
         provider: bestSTT,
         status: this.getSTTStatus(bestSTT),
-        keyEnvVar: STT_KEY_MAP[bestSTT] ?? null,
-        hasKey: this.hasKey(STT_KEY_MAP[bestSTT]),
+        keyEnvVar: sttKeyEnvVar,
+        maskedSecretRef: STT_SECURE_MAP[bestSTT] ? `vault::${STT_SECURE_MAP[bestSTT]}` : (sttKeyEnvVar ? `ENV::${sttKeyEnvVar}` : undefined),
+        hasKey: this.hasKey(STT_SECURE_MAP[bestSTT], sttKeyEnvVar),
         notes: bestSTT === 'none'
-          ? 'No STT provider configured. Set VITE_OPENAI_API_KEY for Whisper.'
+          ? 'No STT provider configured. Configure OpenAI Whisper in Settings.'
           : `Using ${bestSTT}.`,
       },
       tts: {
         provider: bestTTS,
         status: this.getTTSStatus(bestTTS),
-        keyEnvVar: TTS_KEY_MAP[bestTTS] ?? null,
-        hasKey: this.hasKey(TTS_KEY_MAP[bestTTS]),
+        keyEnvVar: ttsKeyEnvVar,
+        maskedSecretRef: TTS_SECURE_MAP[bestTTS] ? `vault::${TTS_SECURE_MAP[bestTTS]}` : (ttsKeyEnvVar ? `ENV::${ttsKeyEnvVar}` : undefined),
+        hasKey: this.hasKey(TTS_SECURE_MAP[bestTTS], ttsKeyEnvVar),
         notes: bestTTS === 'none'
-          ? 'No TTS provider configured. Set VITE_OPENAI_API_KEY or VITE_ELEVENLABS_API_KEY.'
+          ? 'No TTS provider configured. Configure OpenAI or ElevenLabs in Settings.'
           : `Using ${bestTTS}.`,
       },
-      realtimeAvailable: this.hasKey('VITE_OPENAI_REALTIME_KEY'),
+      realtimeAvailable: this.hasKey('openai', 'VITE_OPENAI_REALTIME_KEY'),
       micPermissionRequested: false, // Never true until Phase 3
     };
   }
@@ -126,8 +143,8 @@ class VoiceProviderService {
   describeTTSDryRun(req: VoiceSynthesisRequest): string {
     const status = this.getTTSStatus(req.provider);
     if (req.provider === 'none') return 'TTS disabled — no output.';
-    if (status === 'missing_key') {
-      return `[DRY RUN] ${req.provider} TTS would fail — API key not configured. Text: "${req.text.slice(0, 50)}..."`;
+    if (status === 'missing_secret') {
+      return `[DRY RUN] ${req.provider} TTS would fail — secret not configured. Text: "${req.text.slice(0, 50)}..."`;
     }
     return `[DRY RUN] ${req.provider} TTS would synthesise: "${req.text.slice(0, 50)}..." at speed ${req.speed ?? 1.0}`;
   }
@@ -146,8 +163,8 @@ class VoiceProviderService {
       return '[DRY RUN] Browser SpeechRecognition would listen — microphone permission not yet requested.';
     }
     const status = this.getSTTStatus(req.provider);
-    if (status === 'missing_key') {
-      return `[DRY RUN] ${req.provider} STT would fail — API key not configured.`;
+    if (status === 'missing_secret') {
+      return `[DRY RUN] ${req.provider} STT would fail — secret not configured.`;
     }
     return `[DRY RUN] ${req.provider} STT would transcribe audio${req.audioDescription ? ': ' + req.audioDescription : ''}.`;
   }
@@ -187,10 +204,10 @@ useMockAudioReactivity continues to drive the visualizer in all current phases.
       `Voice Pipeline Dry-Run (${new Date().toLocaleTimeString()})`,
       `STT: ${health.stt.provider} — ${health.stt.status}`,
       `TTS: ${health.tts.provider} — ${health.tts.status}`,
-      `Realtime: ${health.realtimeAvailable ? 'key configured' : 'key missing'}`,
+      `Realtime: ${health.realtimeAvailable ? 'secret configured' : 'secret missing'}`,
       `Microphone: NOT requested (Phase 3)`,
-      health.stt.status === 'missing_key' ? `  → Add ${health.stt.keyEnvVar} to .env to enable STT` : '',
-      health.tts.status === 'missing_key' ? `  → Add ${health.tts.keyEnvVar} to .env to enable TTS` : '',
+      health.stt.status === 'missing_secret' ? `  → Add secret for STT provider to Vault` : '',
+      health.tts.status === 'missing_secret' ? `  → Add secret for TTS provider to Vault` : '',
     ].filter(Boolean);
     return lines.join('\n');
   }
@@ -199,15 +216,15 @@ useMockAudioReactivity continues to drive the visualizer in all current phases.
 
   private getBestSTTProvider(): STTProviderType {
     if (this.preferredSTT !== 'none') return this.preferredSTT;
-    if (this.hasKey('VITE_OPENAI_API_KEY')) return 'openai-whisper';
-    if (this.hasKey('VITE_OPENAI_REALTIME_KEY')) return 'openai-realtime';
+    if (this.hasKey('openai', 'VITE_OPENAI_API_KEY')) return 'openai-whisper';
+    if (this.hasKey('openai', 'VITE_OPENAI_REALTIME_KEY')) return 'openai-realtime';
     return 'none';
   }
 
   private getBestTTSProvider(): TTSProviderType {
     if (this.preferredTTS !== 'none') return this.preferredTTS;
-    if (this.hasKey('VITE_ELEVENLABS_API_KEY')) return 'elevenlabs';
-    if (this.hasKey('VITE_OPENAI_API_KEY')) return 'openai-tts';
+    if (this.hasKey('elevenlabs', 'VITE_ELEVENLABS_API_KEY')) return 'elevenlabs';
+    if (this.hasKey('openai', 'VITE_OPENAI_API_KEY')) return 'openai-tts';
     return 'none';
   }
 

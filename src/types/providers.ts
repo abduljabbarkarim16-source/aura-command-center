@@ -32,9 +32,12 @@ export type ProviderType =
 
 /** Runtime health of a provider as known to the registry. */
 export type ProviderStatus =
-  | 'configured'    // Key present in env, provider enabled
-  | 'missing_key'   // Env variable known but value absent / blank
-  | 'disabled'      // Explicitly disabled in settings
+  | 'secret_configured'
+  | 'missing_secret'
+  | 'dry_run_ready'
+  | 'live_test_required'
+  | 'disabled'
+  | 'error'
   | 'planned'       // Capability planned; infrastructure not yet built
   | 'unavailable';  // No key, no endpoint, not usable
 
@@ -71,11 +74,42 @@ export interface ProviderConfigSafe {
   defaultModel: string;
   /** Environment variable NAME for the API key. Null if no key needed. */
   keyEnvVar: string | null;
-  /** True when import.meta.env[keyEnvVar] is truthy — value is NEVER exposed */
+  /** Masked reference to the stored secret (never the actual value) */
+  maskedSecretRef?: string;
+  /** True when the secret is confirmed present in SecureKeyService */
   hasKey: boolean;
   /** Optional base URL for self-hosted or proxied endpoints */
   baseUrl: string;
   notes: string;
+}
+
+export interface ProviderRequest {
+  providerId: string;
+  capability: ProviderCapability;
+  model: string;
+  prompt: string;
+  systemPrompt?: string;
+  temperature?: number;
+}
+
+export interface ProviderResponse {
+  content: string;
+  isDryRun: boolean;
+  error?: string;
+}
+
+export interface ProviderDryRunResult {
+  isConfigured: boolean;
+  hasKey: boolean;
+  wouldSucceed: boolean;
+  blockers: string[];
+  configShape: Record<string, unknown>;
+}
+
+export interface ProviderConnectionTest {
+  status: 'passed' | 'failed' | 'not_tested';
+  lastTested: string;
+  message?: string;
 }
 
 // ─── Provider health ──────────────────────────────────────────────────────────
@@ -98,6 +132,7 @@ export interface ProviderHealth {
   defaultModel: string;
   enabled: boolean;
   notes?: string;
+  maskedSecretRef?: string;
 }
 
 // ─── Provider adapter definition ─────────────────────────────────────────────

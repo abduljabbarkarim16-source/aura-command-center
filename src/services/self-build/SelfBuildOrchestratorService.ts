@@ -30,6 +30,9 @@ import { commandPolicyService } from '../commands/CommandPolicyService';
 import { gitAutomationService } from '../git/GitAutomationService';
 import { agentRouter } from '../router/AgentRouterService';
 import { notificationService } from '../notifications/NotificationService';
+import { providerRegistry } from '../providers/ProviderRegistryService';
+import { makeConnectorService } from '../connectors/MakeConnectorService';
+import { workspaceController } from '../workspace/WorkspaceControllerService';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -95,6 +98,103 @@ class SelfBuildOrchestratorService {
       type: 'info',
       title: 'Self-build plan created',
       message: `"${goal.title}" — ${milestones.length} milestone(s), risk: ${overallRisk}`,
+      ttl: 6000,
+    });
+
+    return plan;
+  }
+
+  // ── Readiness evaluation ──────────────────────────────────────────────────
+
+  /**
+   * Evaluates if the system is ready for a full autonomous run.
+   * Checks providers, connectors, and workspace state.
+   */
+  evaluateConnectionReadiness(): { ready: boolean; checks: { name: string; passed: boolean; message: string }[] } {
+    const checks = [];
+
+    // 1. LLM Provider
+    const configuredProviders = providerRegistry.getConfigured();
+    const hasLLM = configuredProviders.some(p => p.capabilities.includes('chat') || p.capabilities.includes('code'));
+    checks.push({
+      name: 'LLM Provider',
+      passed: hasLLM,
+      message: hasLLM ? 'Chat/Code provider configured' : 'Missing secret for Anthropic/OpenAI/etc.',
+    });
+
+    // 2. Make.com Connector
+    const makeStatus = makeConnectorService.getConnectionStatus();
+    checks.push({
+      name: 'Make.com Connector',
+      passed: makeStatus === 'configured',
+      message: makeStatus === 'configured' ? 'Webhook scenarios active' : 'Scenarios not configured',
+    });
+
+    // 3. Workspace
+    const activeWs = workspaceController.getActiveWorkspace();
+    checks.push({
+      name: 'Agent Workspace',
+      passed: !!activeWs,
+      message: activeWs ? `Bound to ${activeWs.name}` : 'No active workspace selected',
+    });
+
+    return {
+      ready: checks.every(c => c.passed),
+      checks,
+    };
+  }
+
+  /**
+   * Specifically creates a plan meant to be executed autonomously
+   * by the dispatcher, skipping the standard "preparation" tasks 
+   * if already initialized.
+   */
+  createAutonomousRunPlan(goalData: Omit<SelfBuildGoal, 'id' | 'createdAt'>): SelfBuildPlan {
+    const readiness = this.evaluateConnectionReadiness();
+    if (!readiness.ready) {
+      notificationService.add({
+        type: 'danger',
+        title: 'Cannot start autonomous run',
+        message: 'System is not connection-ready. Check Providers, Connectors, and Workspace.',
+        ttl: 8000,
+      });
+      throw new Error('System not ready for autonomous run');
+    }
+
+    const goal: SelfBuildGoal = { ...goalData, id: uid(), createdAt: now() };
+    const milestones = this.decomposeGoal(goal); // Reuse decompose logic for now
+    
+    // Tag this plan as autonomous
+    milestones.forEach(m => {
+      m.description = `[AUTONOMOUS] ${m.description}`;
+    });
+
+    const risks = this.estimateRisk(goal, milestones);
+    const overallRisk = this.computeOverallRisk(risks, milestones);
+
+    const plan: SelfBuildPlan = {
+      id: uid(),
+      goal,
+      milestones,
+      risks,
+      overallRisk,
+      status: 'draft',
+      branchStrategy: 'one-per-milestone',
+      estimatedCommandCount: milestones.reduce((n, m) => n + m.tasks.reduce((t, k) => t + k.proposedCommands.length, 0), 0),
+      estimatedFileCount: milestones.reduce((n, m) => n + m.tasks.reduce((t, k) => t + k.affectedFiles.length, 0), 0),
+      requiresAdminApproval: true, // Still require gating for critical tasks
+      validation: null,
+      createdAt: now(),
+      memoryEntryPlan: `Create ai-build-memory entry after autonomous completion: "${goal.title}"`,
+    };
+    
+    this.plans = [plan, ...this.plans].slice(0, 50);
+    this.notify();
+
+    notificationService.add({
+      type: 'info',
+      title: 'Autonomous run scheduled',
+      message: `Goal: "${goal.title}"`,
       ttl: 6000,
     });
 

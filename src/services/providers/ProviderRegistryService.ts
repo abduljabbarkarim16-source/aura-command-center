@@ -21,7 +21,9 @@ import type {
   ProviderStatus,
   ProviderRegistrySummary,
   ProviderCapability,
+  ProviderType,
 } from '../../types/providers';
+import { secureKeyService } from '../security/SecureKeyService';
 
 // ─── Static adapter definitions ───────────────────────────────────────────────
 // These define what each provider CAN do, not what is currently executing.
@@ -130,30 +132,36 @@ const ADAPTER_DEFS: ProviderAdapterDefinition[] = [
 class ProviderRegistryService {
 
   // ── Key presence check ────────────────────────────────────────────────────
-  // SECURITY: Only checks truthiness. NEVER reads, stores, or logs the value.
+  // SECURITY: Queries SecureKeyService to check if a key is stored.
+  // NEVER reads, stores, or logs the value.
 
-  private hasKey(envVar: string | null): boolean {
-    if (!envVar) return false;
-    // import.meta.env is a Vite-specific object — values are injected at build time.
-    // Checking truthiness only — we never touch the string value.
+  private hasKey(providerType: ProviderType, keyEnvVar: string | null): boolean {
+    if (!keyEnvVar) return false;
+    
+    // During foundation phase, we fallback to env vars if the secure store is empty
+    // so the app still functions while we transition.
+    const secureStatus = secureKeyService.getKeyStatus(providerType);
+    if (secureStatus === 'stored') return true;
+
+    // Fallback checking
     const env = import.meta.env as Record<string, string | undefined>;
-    return Boolean(env[envVar]);
+    return Boolean(env[keyEnvVar]);
   }
 
   // ── Status resolution ────────────────────────────────────────────────────
 
   private resolveStatus(def: ProviderAdapterDefinition): ProviderStatus {
-    if (def.isPlanned && !this.hasKey(def.keyEnvVar)) {
+    if (def.isPlanned && !this.hasKey(def.providerType, def.keyEnvVar)) {
       return 'planned';
     }
     if (def.keyEnvVar === null) {
       // No key needed — available if not planned
-      return def.isPlanned ? 'planned' : 'configured';
+      return def.isPlanned ? 'planned' : 'secret_configured';
     }
-    if (this.hasKey(def.keyEnvVar)) {
-      return 'configured';
+    if (this.hasKey(def.providerType, def.keyEnvVar)) {
+      return 'secret_configured'; // Dry run readiness tested separately
     }
-    return 'missing_key';
+    return 'missing_secret';
   }
 
   // ── Public API ────────────────────────────────────────────────────────────
@@ -166,7 +174,8 @@ class ProviderRegistryService {
       displayName:  def.displayName,
       status:       this.resolveStatus(def),
       capabilities: def.capabilities,
-      hasKey:       this.hasKey(def.keyEnvVar),
+      hasKey:       this.hasKey(def.providerType, def.keyEnvVar),
+      maskedSecretRef: def.keyEnvVar ? `vault::${def.providerType}` : undefined,
       keyEnvVar:    def.keyEnvVar,
       defaultModel: def.defaultModel,
       enabled:      true,
@@ -181,22 +190,22 @@ class ProviderRegistryService {
 
   /** Returns providers that are configured (key present and not planned). */
   getConfigured(): ProviderHealth[] {
-    return this.getAll().filter(p => p.status === 'configured');
+    return this.getAll().filter(p => p.status === 'secret_configured' || p.status === 'dry_run_ready');
   }
 
   /** Returns providers available for a specific capability. */
   getByCapability(capability: ProviderCapability): ProviderHealth[] {
     return this.getAll().filter(p =>
-      p.capabilities.includes(capability) && p.status === 'configured',
+      p.capabilities.includes(capability) && (p.status === 'secret_configured' || p.status === 'dry_run_ready'),
     );
   }
 
   /** High-level summary for dashboard/settings display. */
   getSummary(): ProviderRegistrySummary {
     const all = this.getAll();
-    const configured = all.filter(p => p.status === 'configured').length;
+    const configured = all.filter(p => p.status === 'secret_configured' || p.status === 'dry_run_ready').length;
     const planned    = all.filter(p => p.status === 'planned').length;
-    const unavail    = all.filter(p => p.status === 'missing_key' || p.status === 'unavailable').length;
+    const unavail    = all.filter(p => p.status === 'missing_secret' || p.status === 'unavailable').length;
 
     // Which capability buckets are covered by at least one configured provider?
     const allCapabilities: ProviderCapability[] = [
