@@ -44,6 +44,7 @@ import { ApprovalTray } from './ApprovalTray';
 import { NotificationCenter } from './NotificationCenter';
 import { NotificationToast } from './NotificationToast';
 import { useVoiceRuntime } from '../../hooks/useVoiceRuntime';
+import { useRuntimeStatus } from '../../hooks/useRuntimeStatus';
 import type { VoiceRuntimeState } from '../../types/voice-runtime';
 
 // ─── Session guard key ────────────────────────────────────────────────────────
@@ -72,14 +73,20 @@ const BADGE_RISK: Record<string, { bg: string; border: string; text: string }> =
   critical: { bg: 'bg-rose-500/15',    border: 'border-rose-500/30',    text: 'text-rose-400'   },
 };
 
-// ─── Status chips (static labels, values driven by runtime in future) ─────────
+// ─── Runtime state → agent chip label ────────────────────────────────────────
 
-const MOCK_STATUS_CHIPS = [
-  { id: 'memory', icon: <Database className="w-3 h-3" />, label: 'Memory', value: 'Active',      color: 'text-emerald-400' },
-  { id: 'relay',  icon: <Wrench   className="w-3 h-3" />, label: 'Relay',  value: 'Ready',       color: 'text-amber-400'  },
-  { id: 'tools',  icon: <Shield   className="w-3 h-3" />, label: 'Tools',  value: 'Locked',      color: 'text-zinc-500'   },
-  { id: 'agent',  icon: <Bot      className="w-3 h-3" />, label: 'Agent',  value: 'Standing by', color: 'text-indigo-400' },
-];
+function runtimeStateLabel(state: VoiceRuntimeState): string {
+  switch (state) {
+    case 'listening':           return 'Listening';
+    case 'thinking':            return 'Thinking';
+    case 'speaking':            return 'Speaking';
+    case 'waiting_for_approval':return 'Awaiting';
+    case 'executing':           return 'Executing';
+    case 'error':               return 'Error';
+    case 'muted':               return 'Muted';
+    default:                    return 'Standby';
+  }
+}
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -115,6 +122,7 @@ export function AuraVoiceCore({
 
   // ── Runtime ────────────────────────────────────────────────────────────────
   const runtime = useVoiceRuntime();
+  const status  = useRuntimeStatus();
 
   // ── Local UI state (not runtime concerns) ─────────────────────────────────
   const [isTrayOpen,      setIsTrayOpen]      = useState(false);
@@ -122,6 +130,57 @@ export function AuraVoiceCore({
 
   // Greeting guard — fires once per browser session
   const greetedRef = useRef(false);
+
+  // ── Approvals (declared first — used in status chips below) ──────────────────────────
+  const allApprovals      = runtime.pendingApprovals;
+  const pendingCount      = allApprovals.filter(a => a.status === 'pending').length;
+  const activeTrayApproval =
+    allApprovals.find(a => a.status === 'pending') ??
+    allApprovals.find(a => a.status !== 'pending');
+  const trayRiskLevel = activeTrayApproval?.riskLevel ?? 'medium';
+
+  // ── Live status chips (Phase 2G) ───────────────────────────────────────────
+  const agentStateLabel = runtimeStateLabel(runtime.state);
+  const agentColor = runtime.state === 'error' ? 'text-rose-400'
+    : runtime.state === 'listening' ? 'text-sky-400'
+    : runtime.state === 'speaking'  ? 'text-indigo-400'
+    : runtime.state === 'thinking'  ? 'text-violet-400'
+    : 'text-indigo-400';
+
+  const statusChips = [
+    {
+      id: 'memory',
+      icon: <Database className="w-3 h-3" />,
+      label: 'Memory',
+      value: status.memoryCount !== null
+        ? (status.memoryCount > 0 ? `${status.memoryCount} saved` : 'Empty')
+        : 'Active',
+      color: 'text-emerald-400',
+    },
+    {
+      id: 'relay',
+      icon: <Wrench className="w-3 h-3" />,
+      label: 'Relay',
+      value: status.relayActiveCount !== null
+        ? (status.relayActiveCount > 0 ? `${status.relayActiveCount} active` : 'Ready')
+        : 'Ready',
+      color: 'text-amber-400',
+    },
+    {
+      id: 'tools',
+      icon: <Shield className="w-3 h-3" />,
+      label: 'Tools',
+      value: pendingCount > 0 ? `${pendingCount} pending` : 'Locked',
+      color: pendingCount > 0 ? 'text-amber-400' : 'text-zinc-500',
+    },
+    {
+      id: 'agent',
+      icon: <Bot className="w-3 h-3" />,
+      label: 'Agent',
+      value: agentStateLabel,
+      color: agentColor,
+    },
+  ];
 
   // ── Derived runtime values ─────────────────────────────────────────────────
 
@@ -141,16 +200,7 @@ export function AuraVoiceCore({
     return 'aura';
   })();
 
-  // Approvals
-  const allApprovals  = runtime.pendingApprovals;
-  const pendingCount  = allApprovals.filter(a => a.status === 'pending').length;
-  // Show the first pending one; fall back to first resolved (brief display window)
-  const activeTrayApproval =
-    allApprovals.find(a => a.status === 'pending') ??
-    allApprovals.find(a => a.status !== 'pending');
-
-  // Risk of the most urgent pending approval (for badge color)
-  const trayRiskLevel = activeTrayApproval?.riskLevel ?? 'medium';
+  // (Approvals derived above the status chips block)
 
   // ── Side effects ───────────────────────────────────────────────────────────
 
@@ -214,9 +264,9 @@ export function AuraVoiceCore({
       {/* ── ZONE 1: Absolute status strip ───────────────────────────── */}
       <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-5 py-2.5 pointer-events-none">
 
-        {/* Left: status chips */}
+        {/* Left: live status chips */}
         <div className="flex items-center gap-2 pointer-events-auto flex-wrap">
-          {MOCK_STATUS_CHIPS.map(chip => (
+          {statusChips.map(chip => (
             <Fragment key={chip.id}>
               <div className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-900/80 border border-zinc-800/60 rounded-full backdrop-blur-sm">
                 <span className={chip.color}>{chip.icon}</span>
