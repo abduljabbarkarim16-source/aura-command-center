@@ -131,6 +131,7 @@ export interface ProviderHealth {
   keyEnvVar: string | null;
   defaultModel: string;
   enabled: boolean;
+  integrationMode?: ProviderIntegrationMode;
   notes?: string;
   maskedSecretRef?: string;
 }
@@ -143,6 +144,12 @@ export interface ProviderHealth {
  *
  * Actual adapter classes are not implemented until Phase 3.
  */
+export type ProviderIntegrationMode =
+  | 'api'                   // Remote API via key
+  | 'local-workspace-agent' // Local process / workspace bridge, no remote key
+  | 'relay'                 // Clipboard or manual relay handoff
+  | 'browser';              // Browser-native API (SpeechRecognition etc.)
+
 export interface ProviderAdapterDefinition {
   providerType: ProviderType;
   displayName: string;
@@ -152,6 +159,8 @@ export interface ProviderAdapterDefinition {
   defaultModel: string;
   /** True when the capability exists but full execution is not yet wired */
   isPlanned: boolean;
+  /** How this provider integrates — defaults to 'api' when omitted */
+  integrationMode?: ProviderIntegrationMode;
   notes?: string;
 }
 

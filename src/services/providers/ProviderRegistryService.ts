@@ -91,12 +91,14 @@ const ADAPTER_DEFS: ProviderAdapterDefinition[] = [
     notes:        'Clipboard handoff — no key required',
   },
   {
-    providerType: 'antigravity',
-    displayName:  'Antigravity',
-    capabilities: ['chat', 'relay', 'tools'],
-    keyEnvVar:    'VITE_ANTIGRAVITY_API_KEY',
-    defaultModel: 'ag-latest',
-    isPlanned:    false,
+    providerType:    'antigravity',
+    displayName:     'Antigravity',
+    capabilities:    ['local_workspace', 'relay'],
+    keyEnvVar:       null,
+    defaultModel:    'ag-local',
+    isPlanned:       true,
+    integrationMode: 'local-workspace-agent',
+    notes:           'No public Antigravity API key configured; use local agent handoff/workspace bridge.',
   },
   {
     providerType: 'local',
@@ -169,17 +171,18 @@ class ProviderRegistryService {
   /** Returns health snapshot for all registered providers. */
   getAll(): ProviderHealth[] {
     return ADAPTER_DEFS.map(def => ({
-      id:           `provider-${def.providerType}`,
-      providerType: def.providerType,
-      displayName:  def.displayName,
-      status:       this.resolveStatus(def),
-      capabilities: def.capabilities,
-      hasKey:       this.hasKey(def.providerType, def.keyEnvVar),
+      id:              `provider-${def.providerType}`,
+      providerType:    def.providerType,
+      displayName:     def.displayName,
+      status:          this.resolveStatus(def),
+      capabilities:    def.capabilities,
+      hasKey:          this.hasKey(def.providerType, def.keyEnvVar),
       maskedSecretRef: def.keyEnvVar ? `vault::${def.providerType}` : undefined,
-      keyEnvVar:    def.keyEnvVar,
-      defaultModel: def.defaultModel,
-      enabled:      true,
-      notes:        def.notes,
+      keyEnvVar:       def.keyEnvVar,
+      defaultModel:    def.defaultModel,
+      enabled:         true,
+      integrationMode: def.integrationMode,
+      notes:           def.notes,
     }));
   }
 
