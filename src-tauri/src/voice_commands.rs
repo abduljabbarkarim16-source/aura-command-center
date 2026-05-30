@@ -157,7 +157,10 @@ pub async fn openai_transcribe_audio(
     }
 
     let key = get_openai_key()?;
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(90))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
 
     let mime = if content_type.is_empty() { "audio/webm".to_string() } else { content_type };
     let ext = if mime.contains("mp4") || mime.contains("m4a") { "m4a" }
@@ -260,7 +263,10 @@ pub async fn openai_chat_response(
     }
 
     let key = get_openai_key()?;
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(90))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
 
     // Build dynamic system prompt based on response style
     let style_suffix = match response_style.as_deref().unwrap_or("normal") {
@@ -322,7 +328,10 @@ pub async fn openai_synthesize_speech(
     }
 
     let key = get_openai_key()?;
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(90))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
 
     let text = if text.len() > MAX_TEXT_LEN { &text[..MAX_TEXT_LEN] } else { &text };
     let voice = voice.unwrap_or_else(|| "alloy".to_string());

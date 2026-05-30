@@ -56,6 +56,11 @@ const ALLOWED_COMMANDS: &[AllowedCommand] = &[
         args: &["log", "--oneline", "-20"],
         display_name: "Git log (last 20)",
     },
+    AllowedCommand {
+        program: "cargo",
+        args: &["test"],
+        display_name: "Rust unit tests",
+    },
 ];
 
 /// Executables that are always rejected, even if an allowlist entry
@@ -74,7 +79,9 @@ const SHELL_METACHARACTERS: &[char] = &['|', '&', ';', '$', '`', '>', '<', '(', 
 
 // ─── Result types ──────────────────────────────────────────────────────────────
 
+/// camelCase serialization so TypeScript receives exitCode, durationMs etc.
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct CommandResult {
     pub program: String,
     pub args: Vec<String>,
@@ -83,6 +90,7 @@ pub struct CommandResult {
     pub stderr: String,
     pub duration_ms: u64,
     pub allowed: bool,
+    pub cwd: String,
     pub error: Option<String>,
 }
 
@@ -134,16 +142,14 @@ fn is_allowed_command(program: &str, args: &[String]) -> Option<&'static Allowed
 /// Rejects anything not in the list, any blocked executable, and any metacharacters.
 #[tauri::command]
 pub fn run_allowed_command(program: String, args: Vec<String>) -> CommandResult {
+    let resolved_cwd = get_project_root();
+
     // 1. Check for blocked executable
     if is_blocked_executable(&program) {
         return CommandResult {
-            program,
-            args,
-            exit_code: -1,
-            stdout: String::new(),
-            stderr: String::new(),
-            duration_ms: 0,
-            allowed: false,
+            program, args, exit_code: -1,
+            stdout: String::new(), stderr: String::new(),
+            duration_ms: 0, allowed: false, cwd: resolved_cwd,
             error: Some("Blocked: this executable is not allowed".into()),
         };
     }
@@ -151,13 +157,9 @@ pub fn run_allowed_command(program: String, args: Vec<String>) -> CommandResult 
     // 2. Check for shell metacharacters in program and all args
     if contains_metacharacters(&program) || args.iter().any(|a| contains_metacharacters(a)) {
         return CommandResult {
-            program,
-            args,
-            exit_code: -1,
-            stdout: String::new(),
-            stderr: String::new(),
-            duration_ms: 0,
-            allowed: false,
+            program, args, exit_code: -1,
+            stdout: String::new(), stderr: String::new(),
+            duration_ms: 0, allowed: false, cwd: resolved_cwd,
             error: Some("Blocked: shell metacharacters detected".into()),
         };
     }
@@ -166,13 +168,9 @@ pub fn run_allowed_command(program: String, args: Vec<String>) -> CommandResult 
     let allowed = is_allowed_command(&program, &args);
     if allowed.is_none() {
         return CommandResult {
-            program,
-            args,
-            exit_code: -1,
-            stdout: String::new(),
-            stderr: String::new(),
-            duration_ms: 0,
-            allowed: false,
+            program, args, exit_code: -1,
+            stdout: String::new(), stderr: String::new(),
+            duration_ms: 0, allowed: false, cwd: resolved_cwd,
             error: Some("Rejected: command is not in the allowlist".into()),
         };
     }
@@ -196,6 +194,7 @@ pub fn run_allowed_command(program: String, args: Vec<String>) -> CommandResult 
     };
 
     let duration_ms = start.elapsed().as_millis() as u64;
+    let cwd_used = get_project_root();
 
     match output {
         Ok(output) => CommandResult {
@@ -206,6 +205,7 @@ pub fn run_allowed_command(program: String, args: Vec<String>) -> CommandResult 
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             duration_ms,
             allowed: true,
+            cwd: cwd_used,
             error: None,
         },
         Err(e) => CommandResult {
@@ -216,7 +216,8 @@ pub fn run_allowed_command(program: String, args: Vec<String>) -> CommandResult 
             stderr: String::new(),
             duration_ms,
             allowed: true,
-            error: Some(format!("Process error: {}", e)),
+            cwd: cwd_used,
+            error: Some(format!("Process error: {e}")),
         },
     }
 }
@@ -342,16 +343,61 @@ pub fn check_cli_available(binary: String) -> CliAvailabilityResult {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Returns the project root directory.
-/// In Tauri, the executable lives in src-tauri/target/..., so we navigate up
-/// to find the project root by looking for package.json.
+/// Config file for persisted workspace path.
+/// Lives in %APPDATA%\com.aura.commandcenter\workspace.txt
+fn get_persisted_workspace_path() -> Option<std::path::PathBuf> {
+    let appdata = std::env::var("APPDATA").ok()?;
+    let path = std::path::PathBuf::from(appdata)
+        .join("com.aura.commandcenter")
+        .join("workspace.txt");
+    if path.exists() {
+        let content = std::fs::read_to_string(&path).ok()?;
+        let trimmed = content.trim().to_string();
+        if !trimmed.is_empty() {
+            let candidate = std::path::PathBuf::from(&trimmed);
+            if candidate.join("package.json").exists() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// Returns the AURA project root directory.
+///
+/// Resolution order (installed app aware):
+///   1. Persisted workspace path from AppData config (user-set)
+///   2. Well-known AURA repo location: %USERPROFILE%\Documents\AURA\agent-command-center
+///   3. Current directory walk-up (finds package.json)
+///   4. Executable directory walk-up (dev mode)
+///   5. Current directory as last resort
 fn get_project_root() -> String {
-    // Try current directory first
+    // 1. User-persisted workspace path
+    if let Some(p) = get_persisted_workspace_path() {
+        return p.to_string_lossy().to_string();
+    }
+
+    // 2. Well-known default AURA repo location on this machine
+    let known_paths = [
+        "Documents\\AURA\\agent-command-center",
+        "Documents\\aura\\agent-command-center",
+        "AURA\\agent-command-center",
+        "aura\\agent-command-center",
+    ];
+    if let Ok(home) = std::env::var("USERPROFILE") {
+        for rel in &known_paths {
+            let candidate = std::path::PathBuf::from(&home).join(rel);
+            if candidate.join("package.json").exists() {
+                return candidate.to_string_lossy().to_string();
+            }
+        }
+    }
+
+    // 3. Current directory walk-up
     if let Ok(cwd) = std::env::current_dir() {
         if cwd.join("package.json").exists() {
             return cwd.to_string_lossy().to_string();
         }
-        // Walk up from current dir
         let mut dir = cwd.as_path().to_path_buf();
         for _ in 0..6 {
             if let Some(parent) = dir.parent() {
@@ -363,7 +409,7 @@ fn get_project_root() -> String {
         }
     }
 
-    // Fallback: try the executable's directory and walk up
+    // 4. Executable directory walk-up (dev mode)
     if let Ok(exe) = std::env::current_exe() {
         let mut dir = exe.parent().unwrap_or(exe.as_path()).to_path_buf();
         for _ in 0..8 {
@@ -378,10 +424,62 @@ fn get_project_root() -> String {
         }
     }
 
-    // Last resort
+    // 5. Last resort
     std::env::current_dir()
         .map(|d| d.to_string_lossy().to_string())
         .unwrap_or_else(|_| ".".to_string())
+}
+
+/// Returns the resolved workspace path and basic repo status.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceStatus {
+    pub workspace_path: String,
+    pub has_package_json: bool,
+    pub has_git: bool,
+    pub is_configured: bool,
+}
+
+/// Get the current resolved workspace path with status info.
+#[tauri::command]
+pub fn get_workspace_path() -> WorkspaceStatus {
+    let path = get_project_root();
+    let p = std::path::Path::new(&path);
+    WorkspaceStatus {
+        has_package_json: p.join("package.json").exists(),
+        has_git:          p.join(".git").exists(),
+        is_configured:    p.join("package.json").exists() && p.join(".git").exists(),
+        workspace_path:   path,
+    }
+}
+
+/// Persist a custom workspace path to AppData config.
+/// Safety: only accepts paths that contain package.json (must be a valid project root).
+#[tauri::command]
+pub fn set_workspace_path(path: String) -> Result<String, String> {
+    // Reject shell metacharacters
+    if contains_metacharacters(&path) {
+        return Err("Invalid path: contains shell metacharacters".into());
+    }
+
+    let candidate = std::path::Path::new(&path);
+    if !candidate.exists() {
+        return Err(format!("Path does not exist: {path}"));
+    }
+    if !candidate.join("package.json").exists() {
+        return Err(format!("Not a valid project root (no package.json): {path}"));
+    }
+
+    // Write to AppData config
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let config_dir = std::path::PathBuf::from(appdata).join("com.aura.commandcenter");
+        std::fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
+        let config_file = config_dir.join("workspace.txt");
+        std::fs::write(&config_file, &path).map_err(|e| e.to_string())?;
+        return Ok(path);
+    }
+
+    Err("Could not access AppData directory".into())
 }
 
 #[cfg(test)]
