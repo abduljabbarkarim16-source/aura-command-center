@@ -25,6 +25,7 @@ function detectMimeType(): string {
   const types = [
     'audio/webm;codecs=opus',
     'audio/webm',
+    'audio/mp4',
     'audio/ogg;codecs=opus',
     'audio/ogg',
   ];
@@ -88,15 +89,19 @@ export function useVoiceRecorder(maxDurationMs = 15_000): UseVoiceRecorderReturn
     chunksRef.current = [];
     mimeTypeRef.current = detectMimeType();
 
-    // Low bitrate (16 kbps) keeps speech files small for reliable IPC transfer
     const recorderOptions: MediaRecorderOptions = {};
     if (mimeTypeRef.current) recorderOptions.mimeType = mimeTypeRef.current;
-    recorderOptions.audioBitsPerSecond = 16_000;
     const recorder = new MediaRecorder(stream, recorderOptions);
     mediaRecorderRef.current = recorder;
 
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunksRef.current.push(e.data);
+    };
+    recorder.onerror = () => {
+      cleanup();
+      setState(s => ({ ...s, isRecording: false, error: 'Audio encoding failed. Try again.' }));
+      resolveRef.current?.(null);
+      resolveRef.current = null;
     };
 
     recorder.start(100); // collect in 100 ms chunks
