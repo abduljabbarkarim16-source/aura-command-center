@@ -23,11 +23,64 @@
 use serde::{Deserialize, Serialize};
 
 const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024; // 25 MB — Whisper API actual limit
+/// Minimum viable audio size. A real webm/ogg container with even 100 ms of speech
+/// is at least ~3 KB. Anything smaller is silence, a recording glitch, or an empty
+/// MediaRecorder frame — do not waste an API call on it.
+const MIN_AUDIO_BYTES: usize = 3_000;
 const MAX_TEXT_LEN: usize = 4096;
 const MAX_RESPONSE_TOKENS: u32 = 300; // Phase 3D: raised from 150 to support detailed responses
 const CHAT_MODEL: &str = "gpt-4o-mini";
 const TTS_MODEL: &str = "tts-1";
 const STT_MODEL: &str = "whisper-1";
+
+/// Whisper no-speech probability threshold.
+/// `verbose_json` response includes `no_speech_prob` per segment.
+/// If the max segment probability exceeds this, we treat the audio as silence.
+/// 0.60 is aggressive enough to catch silent recordings; lower means more false rejections.
+const NO_SPEECH_PROB_THRESHOLD: f64 = 0.60;
+
+/// Known Whisper hallucination substrings. Whisper was trained on YouTube videos and
+/// podcasts; when given silence or very low-energy audio it frequently hallucinates these.
+/// We reject any transcript that contains these patterns.
+const HALLUCINATION_SUBSTRINGS: &[&str] = &[
+    "thank you for watching",
+    "thanks for watching",
+    "thank you for watching.",
+    "please subscribe",
+    "like and subscribe",
+    "don't forget to subscribe",
+    "see you in the next video",
+    "see you next time",
+    "you for watching",
+    "subtitles by",
+    "transcribed by",
+    "captions by",
+    "provided by",
+    "[music]",
+    "[silence]",
+    "[applause]",
+    "[laughter]",
+];
+
+/// Returns true if the transcript looks like a Whisper hallucination rather than
+/// real speech. Checks two things:
+///   1. Known YouTube/podcast hallucination patterns
+///   2. No alphabetic characters at all (pure emoji / symbol output)
+fn is_likely_hallucination(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    for pattern in HALLUCINATION_SUBSTRINGS {
+        if lower.contains(pattern) {
+            return true;
+        }
+    }
+    // If the entire output has no alphabetic characters it is almost certainly hallucinated
+    // noise (e.g. a stream of emoji).
+    let has_alpha = lower.chars().any(|c| c.is_alphabetic());
+    if !has_alpha && !text.trim().is_empty() {
+        return true;
+    }
+    false
+}
 
 // ─── System prompt ─────────────────────────────────────────────────────────────
 // Phase 3D: improved voice-first prompt with no filler phrases
@@ -72,18 +125,35 @@ fn get_openai_key() -> Result<String, String> {
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
 /// Transcribe audio bytes using OpenAI Whisper.
-/// Accepts raw audio bytes and the MIME type (e.g. "audio/webm").
-/// Returns the transcript text or an error string.
+///
+/// Three-layer hallucination defence:
+///   1. Pre-flight: reject audio below MIN_AUDIO_BYTES (silence / empty recording)
+///   2. API params: verbose_json + temperature=0 + language=en to minimise Whisper drift
+///   3. Post-filter: reject transcripts whose no_speech_prob > threshold OR that match
+///      known YouTube hallucination patterns (e.g. "thank you for watching")
+///
+/// Returns empty string ("") for silent/hallucinated audio so the caller can show
+/// "No speech detected" rather than propagating garbage to the chat step.
+/// Returns Err only for genuine API/network failures.
 #[tauri::command]
 pub async fn openai_transcribe_audio(
     audio_bytes: Vec<u8>,
     content_type: String,
 ) -> Result<String, String> {
+    // ── Layer 1: Pre-flight size gate ─────────────────────────────────────────
     if audio_bytes.is_empty() {
         return Err("Audio bytes are empty".to_string());
     }
+    if audio_bytes.len() < MIN_AUDIO_BYTES {
+        // Too small to contain real speech — return empty rather than error
+        // so the frontend shows "No speech detected" instead of an error banner.
+        return Ok(String::new());
+    }
     if audio_bytes.len() > MAX_AUDIO_BYTES {
-        return Err(format!("Audio exceeds {MAX_AUDIO_BYTES} byte limit"));
+        return Err(format!(
+            "Recording too large ({} MB). Please keep recordings under 25 MB.",
+            audio_bytes.len() / 1_048_576
+        ));
     }
 
     let key = get_openai_key()?;
@@ -100,9 +170,16 @@ pub async fn openai_transcribe_audio(
         .mime_str(&mime)
         .map_err(|e| e.to_string())?;
 
+    // ── Layer 2: API params to reduce hallucination ───────────────────────────
+    // verbose_json gives us no_speech_prob per segment.
+    // temperature=0 is deterministic — much less likely to hallucinate.
+    // language=en avoids cross-language drift on noisy input.
     let form = reqwest::multipart::Form::new()
         .part("file", file_part)
-        .text("model", STT_MODEL);
+        .text("model", STT_MODEL)
+        .text("response_format", "verbose_json")
+        .text("temperature", "0")
+        .text("language", "en");
 
     let res = client
         .post("https://api.openai.com/v1/audio/transcriptions")
@@ -120,7 +197,28 @@ pub async fn openai_transcribe_audio(
         return Err(format!("OpenAI STT error: {msg}"));
     }
 
-    Ok(body["text"].as_str().unwrap_or("").trim().to_string())
+    let text = body["text"].as_str().unwrap_or("").trim().to_string();
+
+    // ── Layer 3: no_speech_prob + hallucination pattern filter ────────────────
+    // Check the highest no_speech_prob across all segments.
+    if let Some(segments) = body["segments"].as_array() {
+        let max_no_speech: f64 = segments
+            .iter()
+            .filter_map(|s| s["no_speech_prob"].as_f64())
+            .fold(0.0_f64, f64::max);
+
+        if max_no_speech > NO_SPEECH_PROB_THRESHOLD {
+            // Whisper itself thinks this is silence — discard silently.
+            return Ok(String::new());
+        }
+    }
+
+    if is_likely_hallucination(&text) {
+        // Known hallucination pattern — discard silently.
+        return Ok(String::new());
+    }
+
+    Ok(text)
 }
 
 /// Generate a short AURA chat response for a transcript.

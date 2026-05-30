@@ -397,12 +397,24 @@ export function AuraVoiceCore({
     // ── STT ───────────────────────────────────────────────────────────────────
     const sttResult = await openAIVoiceSessionService.transcribeAudio(blob);
 
-    if (!sttResult.success || !sttResult.text?.trim()) {
+    if (!sttResult.success) {
+      // Genuine API / network error
       setConvPhase('error');
       setConvError(sttResult.error ?? 'Could not understand audio — speak clearly and try again.');
       setLiveTranscript(null);
       runningRef.current = false;
       setTimeout(() => { setConvPhase('idle'); setConvError(null); }, 4000);
+      return;
+    }
+
+    if (!sttResult.text?.trim()) {
+      // Empty string from Rust = silence or hallucination filtered out.
+      // Show a gentle hint — not an error — and reset cleanly.
+      setConvPhase('idle');
+      setConvError('No speech detected — speak clearly after clicking Speak.');
+      setLiveTranscript(null);
+      runningRef.current = false;
+      setTimeout(() => setConvError(null), 3500);
       return;
     }
 
