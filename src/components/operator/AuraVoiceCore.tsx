@@ -208,6 +208,8 @@ export function AuraVoiceCore({
     stopPhrases: ['stop listening', 'pause conversation', "that's all", 'go idle', 'stop aura'],
     onTurnComplete: addTurn,
     onPhaseChange: (phase) => setLoopPhaseLabel(loopPhaseLabel(phase)),
+    fastResponseMode: voiceSettings.fastResponseMode ?? false,
+    sentenceFirstTTS: voiceSettings.sentenceFirstTTS ?? true,
   });
 
   // ── One-shot manual mode ───────────────────────────────────────────────────
@@ -719,7 +721,7 @@ export function AuraVoiceCore({
               </div>
             )}
 
-            {/* Status hints */}
+            {/* Status hints + latency display */}
             <div className="flex items-center gap-3 pt-0.5 flex-wrap">
               {conversationModeEnabled && (
                 <span className="text-[10px] text-emerald-600 flex items-center gap-1">
@@ -727,9 +729,20 @@ export function AuraVoiceCore({
                   Conversation mode active
                 </span>
               )}
+              {voiceSettings.fastResponseMode && (
+                <span className="text-[10px] text-amber-500 flex items-center gap-1">
+                  <span className="w-1 h-1 rounded-full bg-amber-500" />Fast
+                </span>
+              )}
               {!conversationModeEnabled && voiceSettings.autoStopEnabled && (
                 <span className="text-[10px] text-zinc-600 flex items-center gap-1">
                   <span className="w-1 h-1 rounded-full bg-zinc-600" />Auto-stop on pause
+                </span>
+              )}
+              {/* Latency display (last turn) */}
+              {loop.lastLatencyMetrics && (
+                <span className="text-[9px] text-zinc-700 flex items-center gap-1" title="Last turn latency breakdown">
+                  ⏱ {loop.lastLatencyMetrics.perceivedLatencyMs}ms
                 </span>
               )}
               <span className="text-[10px] text-zinc-700 flex items-center gap-1 ml-auto">
@@ -896,6 +909,13 @@ export function AuraVoiceCore({
                 className={cn('flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold transition-all',
                   voiceSettings.enabled ? 'bg-indigo-600/20 border-indigo-500/40 text-indigo-300' : 'bg-zinc-900/60 border-zinc-700/40 text-zinc-500')}>
                 <Radio className="w-2.5 h-2.5" />{voiceSettings.enabled ? 'On' : 'Off'}
+              </button>
+              <button
+                onClick={() => setVoiceSettings(s => ({ ...s, fastResponseMode: !s.fastResponseMode }))}
+                title="Fast mode: 1-sentence reply first, then full answer"
+                className={cn('flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold transition-all',
+                  voiceSettings.fastResponseMode ? 'bg-amber-500/20 border-amber-500/40 text-amber-300' : 'bg-zinc-900/60 border-zinc-700/40 text-zinc-500 hover:text-zinc-300')}>
+                ⚡ {voiceSettings.fastResponseMode ? 'Fast' : 'Std'}
               </button>
               <button onClick={() => runtime.toggleSafeMode()}
                 className={cn('flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-colors',

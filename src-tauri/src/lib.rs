@@ -1,6 +1,7 @@
 mod commands;
 mod config_commands;
 mod voice_commands;
+mod cli_commands;
 
 // Walk up the directory tree from `start`, trying to load a `.env` file.
 // Returns true if a `.env` was successfully loaded.
@@ -92,6 +93,8 @@ pub fn run() {
       voice_commands::openai_transcribe_audio,
       voice_commands::openai_chat_response,
       voice_commands::openai_synthesize_speech,
+      cli_commands::spawn_agent_session,
+      cli_commands::get_cli_help,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
