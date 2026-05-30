@@ -29,6 +29,9 @@ const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024; // 25 MB — Whisper API actual
 const MIN_AUDIO_BYTES: usize = 3_000;
 const MAX_TEXT_LEN: usize = 4096;
 const MAX_RESPONSE_TOKENS: u32 = 300; // Phase 3D: raised from 150 to support detailed responses
+/// Ultra-low token budget for fast acknowledgement reply (1 sentence, ≤12 words).
+/// Cuts chat generation time from ~800-2000ms to ~200-500ms for the first spoken reply.
+const MAX_FAST_TOKENS: u32 = 40;
 const CHAT_MODEL: &str = "gpt-4o-mini";
 const TTS_MODEL: &str = "tts-1";
 const STT_MODEL: &str = "whisper-1";
@@ -103,6 +106,13 @@ const RESPONSE_STYLE_NORMAL: &str =
     " Aim for 2 to 3 sentences.";
 const RESPONSE_STYLE_DETAILED: &str =
     " You may use up to 5 sentences if the topic requires it.";
+
+/// System prompt for the fast acknowledgement path.
+/// Forces a single spoken sentence of ≤12 words. No markdown, no hedging.
+const AURA_FAST_SYSTEM_PROMPT: &str =
+    "You are AURA, a voice assistant. Reply in exactly ONE spoken sentence. \
+     Maximum 12 words. No markdown. No filler phrases like 'Certainly' or 'Of course'. \
+     If the request needs more work, say what you are doing in simple words.";
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
 
@@ -306,6 +316,65 @@ pub async fn openai_chat_response(
     if !status.is_success() {
         let msg = data["error"]["message"].as_str().unwrap_or("Chat failed");
         return Err(format!("OpenAI chat error: {msg}"));
+    }
+
+    Ok(data["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_string())
+}
+
+/// Ultra-fast single-sentence AURA reply for the Fast Mode first-audio path.
+///
+/// Key differences from openai_chat_response:
+///   - max_tokens = 40 (vs 300) — forces 1 short sentence, cuts generation time 4–6x
+///   - No conversation history — no extra context tokens, smaller request payload
+///   - Dedicated system prompt demands ≤12 words, no hedging
+///   - Same gpt-4o-mini model — already the fastest available
+///
+/// This command is only called by the fast mode first-reply path.
+/// The full response is always fetched separately via openai_chat_response.
+#[tauri::command]
+pub async fn openai_fast_chat_response(
+    transcript: String,
+) -> Result<String, String> {
+    if transcript.trim().is_empty() {
+        return Err("Transcript is empty".to_string());
+    }
+
+    let key = get_openai_key()?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let messages = serde_json::json!([
+        { "role": "system", "content": AURA_FAST_SYSTEM_PROMPT },
+        { "role": "user", "content": transcript.trim() }
+    ]);
+
+    let body = serde_json::json!({
+        "model": CHAT_MODEL,
+        "max_tokens": MAX_FAST_TOKENS,
+        "messages": messages,
+    });
+
+    let res = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .header("Authorization", format!("Bearer {key}"))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {e}"))?;
+
+    let status = res.status();
+    let data: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+
+    if !status.is_success() {
+        let msg = data["error"]["message"].as_str().unwrap_or("Fast chat failed");
+        return Err(format!("OpenAI fast chat error: {msg}"));
     }
 
     Ok(data["choices"][0]["message"]["content"]

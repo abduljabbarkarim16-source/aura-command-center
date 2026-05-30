@@ -8,14 +8,15 @@
  * No network. No real agent execution. All mock data.
  */
 
-import React, { Fragment } from 'react';
+import React, { Fragment, useState } from 'react';
 import {
   X, FolderKanban, Workflow, BringToFront, Activity,
   Settings2, ShieldCheck, AlertTriangle, CheckCircle2,
-  ArrowRight, Target, Bot, HardDrive, GitBranch, RefreshCw,
+  ArrowRight, Target, Bot, HardDrive, GitBranch, RefreshCw, ListTodo,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useWorkspaceController } from '../../hooks/useWorkspaceController';
+import { BackgroundTasksPanel } from './BackgroundTasksPanel';
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
 
@@ -81,6 +82,7 @@ export function AdminPanelOverlay({
   onOpenTechnicalDrawer,
 }: AdminPanelOverlayProps) {
   const { activeWorkspace, lastScan, isScanning, scan } = useWorkspaceController();
+  const [activeTab, setActiveTab] = useState<'overview' | 'tasks'>('overview');
 
   return (
     <>
@@ -116,7 +118,36 @@ export function AdminPanelOverlay({
           </button>
         </div>
 
-        {/* Scrollable body */}
+        {/* Tab bar */}
+        <div className="flex shrink-0 border-b border-zinc-800/60 px-5 gap-1 pt-2">
+          {([
+            { id: 'overview', label: 'Overview',    icon: <Activity className="w-3 h-3" /> },
+            { id: 'tasks',    label: 'Background Tasks', icon: <ListTodo className="w-3 h-3" /> },
+          ] as const).map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium border-b-2 transition-colors -mb-px',
+                activeTab === tab.id
+                  ? 'border-indigo-500 text-indigo-300'
+                  : 'border-transparent text-zinc-500 hover:text-zinc-300',
+              )}
+            >
+              {tab.icon}{tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Background Tasks tab */}
+        {activeTab === 'tasks' && (
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <BackgroundTasksPanel />
+          </div>
+        )}
+
+        {/* Overview tab — scrollable body */}
+        {activeTab === 'overview' && (
         <div className="flex-1 overflow-y-auto custom-scrollbar px-5 py-5 flex flex-col gap-6">
 
           {/* ── Projects ──────────────────────────────────────────────── */}
@@ -266,6 +297,7 @@ export function AdminPanelOverlay({
             </div>
           </section>
         </div>
+        )} {/* end overview tab */}
 
         {/* Footer — Technical Drawer shortcut */}
         <div className="shrink-0 border-t border-zinc-800/60 px-5 py-4">

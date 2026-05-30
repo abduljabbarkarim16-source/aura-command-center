@@ -90,6 +90,27 @@ class VoiceLatencyServiceImpl {
     if (ctx) ctx.audioStartedAt = Date.now();
   }
 
+  // Sentence-first TTS granular markers (Phase 3F QA)
+  markFirstSentenceTextReady(turnId: string) {
+    const ctx = this.active.get(turnId);
+    if (ctx) ctx.firstSentenceTextReadyAt = Date.now();
+  }
+
+  markFirstSentenceTtsReady(turnId: string) {
+    const ctx = this.active.get(turnId);
+    if (ctx) ctx.firstSentenceTtsReadyAt = Date.now();
+  }
+
+  markFirstAudioStart(turnId: string) {
+    const ctx = this.active.get(turnId);
+    if (ctx) ctx.firstAudioStartAt = Date.now();
+  }
+
+  markFullAudioReady(turnId: string) {
+    const ctx = this.active.get(turnId);
+    if (ctx) ctx.fullAudioReadyAt = Date.now();
+  }
+
   finalize(turnId: string): VoiceLatencyMetrics | null {
     const ctx = this.active.get(turnId);
     if (!ctx) return null;
@@ -122,6 +143,15 @@ class VoiceLatencyServiceImpl {
       audioPlaybackStartMs: playMs,
       perceivedLatencyMs:  Math.max(0, perceived),
       totalRoundTripMs:    total,
+      // Sentence-first TTS granular metrics
+      firstSentenceTextReadyMs: ctx.firstSentenceTextReadyAt
+        ? ctx.firstSentenceTextReadyAt - recEnd : undefined,
+      firstSentenceTtsReadyMs: (ctx.firstSentenceTextReadyAt && ctx.firstSentenceTtsReadyAt)
+        ? ctx.firstSentenceTtsReadyAt - ctx.firstSentenceTextReadyAt : undefined,
+      firstAudioStartMs: ctx.firstAudioStartAt
+        ? ctx.firstAudioStartAt - recEnd : undefined,
+      fullAudioReadyMs: ctx.fullAudioReadyAt
+        ? ctx.fullAudioReadyAt - recEnd : undefined,
       responseStyle:       ctx.responseStyle,
       segmentedMode:       ctx.segmentedMode,
       sentenceFirstTTS:    ctx.sentenceFirstTTS,

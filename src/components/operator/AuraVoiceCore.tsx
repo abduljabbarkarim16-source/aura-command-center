@@ -126,25 +126,29 @@ import type { LoopPhase } from '../../hooks/useConversationLoop';
 
 function loopPhaseVisualizer(phase: LoopPhase): VisualizerState {
   switch (phase) {
-    case 'listening':    return 'listening';
-    case 'transcribing': return 'thinking';
-    case 'thinking':     return 'thinking';
-    case 'speaking':     return 'speaking';
-    case 'dormant':      return 'idle';
-    case 'error':        return 'error';
-    default:             return 'idle';
+    case 'listening':       return 'listening';
+    case 'transcribing':    return 'thinking';
+    case 'acknowledging':   return 'thinking';
+    case 'thinking':        return 'thinking';
+    case 'preparing_voice': return 'thinking';
+    case 'speaking':        return 'speaking';
+    case 'dormant':         return 'idle';
+    case 'error':           return 'error';
+    default:                return 'idle';
   }
 }
 
 function loopPhaseLabel(phase: LoopPhase): string {
   switch (phase) {
-    case 'listening':    return 'Listening…';
-    case 'transcribing': return 'Processing…';
-    case 'thinking':     return 'Thinking…';
-    case 'speaking':     return 'Speaking…';
-    case 'dormant':      return 'Dormant';
-    case 'error':        return 'Error';
-    default:             return '';
+    case 'listening':       return 'Listening…';
+    case 'transcribing':    return 'Processing…';
+    case 'acknowledging':   return 'Heard…';
+    case 'thinking':        return 'Thinking…';
+    case 'preparing_voice': return 'Preparing voice…';
+    case 'speaking':        return 'Speaking…';
+    case 'dormant':         return 'Dormant';
+    case 'error':           return 'Error';
+    default:                return '';
   }
 }
 
@@ -704,10 +708,12 @@ export function AuraVoiceCore({
               <span className="text-[12px] leading-relaxed flex-1">
                 {(() => {
                   const ph = conversationModeEnabled ? loop.loopPhase : oneShotPhase;
-                  if (ph === 'transcribing') return <span className="text-violet-400 italic animate-pulse">Transcribing…</span>;
-                  if (ph === 'thinking')     return <span className="text-violet-400 italic animate-pulse">{liveTranscript?.user ? `"${liveTranscript.user.slice(0,50)}…" — thinking…` : 'Thinking…'}</span>;
-                  if (ph === 'speaking')     return <span className="text-indigo-300">{liveTranscript?.aura ?? '…'}</span>;
-                  if (liveTranscript?.aura)  return <span className="text-zinc-300">{liveTranscript.aura}</span>;
+                  if (ph === 'transcribing')    return <span className="text-violet-400 italic animate-pulse">Transcribing…</span>;
+                  if (ph === 'acknowledging')   return <span className="text-amber-400 font-medium">{liveTranscript?.aura ?? 'Got it.'}</span>;
+                  if (ph === 'thinking')        return <span className="text-violet-400 italic animate-pulse">{liveTranscript?.user ? `"${liveTranscript.user.slice(0,50)}…" — thinking…` : 'Thinking…'}</span>;
+                  if (ph === 'preparing_voice') return <span className="text-sky-400 italic animate-pulse">Preparing voice…</span>;
+                  if (ph === 'speaking')        return <span className="text-indigo-300">{liveTranscript?.aura ?? '…'}</span>;
+                  if (liveTranscript?.aura)     return <span className="text-zinc-300">{liveTranscript.aura}</span>;
                   return <span className="text-zinc-600 italic">Response will appear here</span>;
                 })()}
               </span>
@@ -741,8 +747,23 @@ export function AuraVoiceCore({
               )}
               {/* Latency display (last turn) */}
               {loop.lastLatencyMetrics && (
-                <span className="text-[9px] text-zinc-700 flex items-center gap-1" title="Last turn latency breakdown">
-                  ⏱ {loop.lastLatencyMetrics.perceivedLatencyMs}ms
+                <span
+                  className="text-[9px] text-zinc-700 flex items-center gap-1 cursor-default"
+                  title={[
+                    `Perceived: ${loop.lastLatencyMetrics.perceivedLatencyMs}ms`,
+                    `Chat: ${loop.lastLatencyMetrics.chatTotalMs}ms`,
+                    `TTS: ${loop.lastLatencyMetrics.ttsSynthesisMs}ms`,
+                    loop.lastLatencyMetrics.firstAudioStartMs != null
+                      ? `First audio: ${loop.lastLatencyMetrics.firstAudioStartMs}ms`
+                      : null,
+                    loop.lastLatencyMetrics.fullAudioReadyMs != null
+                      ? `Full audio: ${loop.lastLatencyMetrics.fullAudioReadyMs}ms`
+                      : null,
+                  ].filter(Boolean).join(' · ')}
+                >
+                  ⏱ {loop.lastLatencyMetrics.firstAudioStartMs != null
+                    ? `${loop.lastLatencyMetrics.firstAudioStartMs}ms first`
+                    : `${loop.lastLatencyMetrics.perceivedLatencyMs}ms`}
                 </span>
               )}
               <span className="text-[10px] text-zinc-700 flex items-center gap-1 ml-auto">
