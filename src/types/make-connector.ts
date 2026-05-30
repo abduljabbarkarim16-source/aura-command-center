@@ -22,7 +22,8 @@ export type MakeScenarioEvent =
   | 'build_completed'
   | 'phase3_connection_test'
   | 'phase3b_self_build_dry_run_completed'
-  | 'phase3c_voice_conversation_test_completed';
+  | 'phase3c_voice_conversation_test_completed'
+  | 'phase3d_voice_upgrade_test_completed';
 
 export interface MakeScenarioTrigger {
   events: MakeScenarioEvent[];

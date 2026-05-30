@@ -1,8 +1,8 @@
 /**
- * voice-session.ts — AURA Phase 3C
+ * voice-session.ts — AURA Phase 3D
  *
  * Type vocabulary for voice session management.
- * Phase 3C adds full conversation turn types and recording state.
+ * Phase 3D adds VAD-lite, barge-in, wake phrase, and response style settings.
  *
  * Security invariants:
  * - API keys are never stored here
@@ -101,16 +101,28 @@ export interface VoiceSpeechResult {
 
 export interface VoiceConversationSettings {
   enabled: boolean;
-  maxRecordingDurationMs: number;   // default 15_000
+  maxRecordingDurationMs: number;   // default 30_000 (Phase 3D: raised from 15s)
   ttsVoice: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
   persistTranscripts: boolean;      // default false
+  // Phase 3D additions
+  autoStopEnabled: boolean;         // VAD-lite auto-stop on silence, default true
+  silenceThresholdMs: number;       // ms of silence before auto-stop, default 1200
+  interruptEnabled: boolean;        // allow barge-in while AURA is speaking, default true
+  wakePhrase: boolean;              // continuous wake phrase listening, default false
+  responseStyle: 'brief' | 'normal' | 'detailed';  // controls AURA response length, default 'normal'
 }
 
 export const DEFAULT_VOICE_SETTINGS: VoiceConversationSettings = {
   enabled: true,
-  maxRecordingDurationMs: 15_000,
+  maxRecordingDurationMs: 30_000,
   ttsVoice: 'alloy',
   persistTranscripts: false,
+  // Phase 3D
+  autoStopEnabled: true,
+  silenceThresholdMs: 1200,
+  interruptEnabled: true,
+  wakePhrase: false,
+  responseStyle: 'normal',
 };
 
 // ─── Session ──────────────────────────────────────────────────────────────────
