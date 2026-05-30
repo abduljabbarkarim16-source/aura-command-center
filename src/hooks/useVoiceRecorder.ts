@@ -88,7 +88,11 @@ export function useVoiceRecorder(maxDurationMs = 15_000): UseVoiceRecorderReturn
     chunksRef.current = [];
     mimeTypeRef.current = detectMimeType();
 
-    const recorder = new MediaRecorder(stream, mimeTypeRef.current ? { mimeType: mimeTypeRef.current } : {});
+    // Low bitrate (16 kbps) keeps speech files small for reliable IPC transfer
+    const recorderOptions: MediaRecorderOptions = {};
+    if (mimeTypeRef.current) recorderOptions.mimeType = mimeTypeRef.current;
+    recorderOptions.audioBitsPerSecond = 16_000;
+    const recorder = new MediaRecorder(stream, recorderOptions);
     mediaRecorderRef.current = recorder;
 
     recorder.ondataavailable = (e) => {
