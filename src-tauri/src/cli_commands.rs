@@ -151,8 +151,12 @@ pub fn spawn_agent_session(
     // Both fall back to the plain positional arg if the flag variant fails.
 
     let lower = binary.to_lowercase();
+    // Claude Code: --print flag for non-interactive output (confirmed from --help)
+    // Codex: 'exec' subcommand for non-interactive output (confirmed from --help)
     let args: Vec<String> = if lower == "claude" {
         vec!["--print".to_string(), clean_prompt.clone()]
+    } else if lower == "codex" {
+        vec!["exec".to_string(), clean_prompt.clone()]
     } else {
         vec![clean_prompt.clone()]
     };
@@ -176,21 +180,7 @@ pub fn spawn_agent_session(
     {
         Ok(c) => c,
         Err(e) => {
-            // If --print is not recognized, try without it for claude
-            if lower == "claude" {
-                let plain_args = vec![clean_prompt.clone()];
-                match Command::new(&binary)
-                    .args(&plain_args)
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .spawn()
-                {
-                    Ok(c) => c,
-                    Err(e2) => return make_error(&format!("Failed to spawn '{}': {}", binary, e2)),
-                }
-            } else {
-                return make_error(&format!("Failed to spawn '{}': {}", binary, e));
-            }
+            return make_error(&format!("Failed to spawn '{}': {}", binary, e));
         }
     };
 

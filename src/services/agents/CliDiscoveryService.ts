@@ -63,7 +63,9 @@ class CliDiscoveryServiceImpl {
       helpSummary = helpResult.help_text;
       const lower = helpSummary.toLowerCase();
       supportsPrintFlag       = lower.includes('--print') || lower.includes('-p');
-      supportsNonInteractive  = lower.includes('non-interactive') || lower.includes('--print') || lower.includes('no-interactive');
+      // Codex uses 'exec' subcommand; Claude uses --print flag
+      supportsNonInteractive  = lower.includes('non-interactive') || lower.includes('--print')
+                                || lower.includes('no-interactive') || lower.includes('exec ');
     } catch {
       helpSummary = 'Help unavailable';
     }
