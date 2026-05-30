@@ -1,9 +1,13 @@
 /**
- * useConversationLoop — AURA Phase 3E QA
+ * useConversationLoop — AURA Phase 3E QA3
  *
- * Hands-free conversation state machine.
- * When active: AURA listens → transcribes → responds → listens again.
+ * Hands-free conversation state machine using segmented STT.
+ * When active: AURA listens (segmented) → transcribes → responds → listens again.
  * Stops on: user click, hotkey, stop phrase, dormancy timeout, repeated errors.
+ *
+ * QA3 change: replaced single-blob VAD recorder with useSegmentedVoiceSession.
+ * Each listen cycle now transcribes audio in rolling segments, so 20-45s speech
+ * no longer fails or times out.
  *
  * Security:
  *  - Microphone only active when loopPhase !== 'idle' and !== 'dormant'
@@ -13,7 +17,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { useVoiceActivityRecorder } from './useVoiceActivityRecorder';
+import { useSegmentedVoiceSession } from './useSegmentedVoiceSession';
 import { openAIVoiceSessionService } from '../services/voice/OpenAIVoiceSessionService';
 import { voiceTranscriptLogService } from '../services/voice/VoiceTranscriptLogService';
 import { notifyVoiceError } from '../services/notifications/NotificationService';
@@ -103,12 +107,14 @@ export function useConversationLoop(config: ConversationLoopConfig) {
   useEffect(() => { stopPhrasesRef.current = stopPhrases; }, [stopPhrases]);
   useEffect(() => { autoListenRef.current  = autoListen; }, [autoListen]);
 
-  // ── VAD recorder ──────────────────────────────────────────────────────────
+  // ── Segmented voice session (replaces single-blob VAD recorder) ───────────
   const onAutoStopRef = useRef<(() => void) | undefined>(undefined);
-  const vadRecorder = useVoiceActivityRecorder({
+  const segSession = useSegmentedVoiceSession({
+    segmentMs:          voiceSettings.segmentLengthMs ?? 8_000,
     silenceThresholdMs: voiceSettings.silenceThresholdMs,
     minSpeechMs:        600,
-    maxDurationMs:      voiceSettings.maxRecordingDurationMs,
+    maxDurationMs:      voiceSettings.maxThoughtMs ?? voiceSettings.maxRecordingDurationMs,
+    cleanupEnabled:     voiceSettings.cleanupEnabled ?? true,
     onAutoStop:         () => { onAutoStopRef.current?.(); },
   });
 
@@ -196,7 +202,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     recordStartRef.current = Date.now();
 
     try {
-      await vadRecorder.startRecording();
+      await segSession.startSession();
     } catch {
       updatePhase('error');
     }
@@ -206,25 +212,27 @@ export function useConversationLoop(config: ConversationLoopConfig) {
       dormancyTimerRef.current = setTimeout(() => {
         if (loopPhaseRef.current === 'listening' && !runningRef.current) {
           updatePhase('dormant');
-          vadRecorder.cancelRecording();
+          segSession.cancelSession();
         }
       }, dormancyMs);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearDormancy, dormancyMs, updatePhase]);
 
-  // ── Process a recorded blob ───────────────────────────────────────────────
+  // ── Process assembled transcript from segmented session ───────────────────
+  //
+  // QA3: Instead of receiving a blob and transcribing it here, we receive the
+  // assembled transcript string from useSegmentedVoiceSession. The segmented
+  // session has already transcribed each rolling segment; this function just
+  // handles the chat → TTS → playback pipeline.
 
-  const processBlob = useCallback(async (blob: Blob) => {
+  const processTranscript = useCallback(async (transcript: string) => {
     const elapsed = recordStartRef.current ? Date.now() - recordStartRef.current : 0;
     clearDormancy();
     runningRef.current = true;
-    updatePhase('transcribing');
-    setLiveTranscript({ user: '…', aura: '' });
 
-    if (blob.size < 200) {
+    if (!transcript.trim()) {
       runningRef.current = false;
-      setConsecutiveErrors(e => e + 1);
       if (autoListenRef.current && loopPhaseRef.current !== 'idle') {
         startListeningCycle();
       } else {
@@ -233,43 +241,27 @@ export function useConversationLoop(config: ConversationLoopConfig) {
       return;
     }
 
-    const sttResult = await openAIVoiceSessionService.transcribeAudio(blob);
-    if (!sttResult.success) {
-      notifyVoiceError(sttResult.error ?? 'Transcription failed.');
-      runningRef.current = false;
-      setConsecutiveErrors(e => e + 1);
-      if (autoListenRef.current) startListeningCycle();
-      else updatePhase('idle');
-      return;
-    }
-
-    if (!sttResult.text?.trim()) {
-      // Silence or hallucination filtered — just re-listen without noisy error
-      runningRef.current = false;
-      if (autoListenRef.current) startListeningCycle();
-      else updatePhase('idle');
-      return;
-    }
-
     // Check stop phrases
-    const lower = sttResult.text.toLowerCase();
+    const lower = transcript.toLowerCase();
     const isStop = stopPhrasesRef.current.some(p => lower.includes(p));
     if (isStop) {
-      setLiveTranscript({ user: sttResult.text, aura: 'Conversation paused.' });
+      setLiveTranscript({ user: transcript, aura: 'Conversation paused.' });
       runningRef.current = false;
       updatePhase('idle');
-      vadRecorder.cancelRecording();
+      segSession.cancelSession();
       return;
     }
 
-    setLiveTranscript({ user: sttResult.text, aura: '' });
+    setLiveTranscript({ user: transcript, aura: '' });
     setConsecutiveErrors(0);
     updatePhase('thinking');
 
+    const chatStart = Date.now();
     const chatResult = await openAIVoiceSessionService.createChatResponse(
-      sttResult.text,
+      transcript,
       settingsRef.current.responseStyle ?? 'normal',
     );
+    const chatLatencyMs = Date.now() - chatStart;
 
     if (!chatResult.success || !chatResult.text) {
       notifyVoiceError(chatResult.error ?? 'AI response failed.');
@@ -286,25 +278,23 @@ export function useConversationLoop(config: ConversationLoopConfig) {
 
     const turn: VoiceConversationTurn = {
       id:            `turn-${Date.now()}`,
-      userText:      sttResult.text,
+      userText:      transcript,
       auraText:      chatResult.text,
       timestamp:     new Date().toISOString(),
-      sttLatencyMs:  sttResult.latencyMs,
-      chatLatencyMs: chatResult.latencyMs,
+      chatLatencyMs: chatLatencyMs,
       ttsLatencyMs:  ttsResult.latencyMs,
     };
     onTurnRef.current(turn);
 
     voiceTranscriptLogService.logTurn({
-      userText:     sttResult.text,
-      auraText:     chatResult.text,
-      durationMs:   elapsed,
-      sttLatencyMs: sttResult.latencyMs,
-      chatLatencyMs:chatResult.latencyMs,
-      ttsLatencyMs: ttsResult.latencyMs,
+      userText:      transcript,
+      auraText:      chatResult.text,
+      durationMs:    elapsed,
+      chatLatencyMs: chatLatencyMs,
+      ttsLatencyMs:  ttsResult.latencyMs,
     });
 
-    setLiveTranscript({ user: sttResult.text, aura: chatResult.text });
+    setLiveTranscript({ user: transcript, aura: chatResult.text });
 
     if (!ttsResult.success || !ttsResult.audioBlobUrl) {
       runningRef.current = false;
@@ -316,7 +306,6 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     setCurrentAudioUrl(ttsResult.audioBlobUrl);
     updatePhase('speaking');
 
-    // Start barge-in analyser while AURA speaks
     startBargeInAnalyser();
 
     const audio = new Audio(ttsResult.audioBlobUrl);
@@ -351,11 +340,20 @@ export function useConversationLoop(config: ConversationLoopConfig) {
   useEffect(() => {
     onAutoStopRef.current = async () => {
       if (loopPhaseRef.current !== 'listening' || runningRef.current) return;
-      const blob = await vadRecorder.stopRecording();
-      if (blob) processBlob(blob);
+      updatePhase('transcribing');
+      setLiveTranscript({ user: '…', aura: '' });
+      const transcript = await segSession.stopSession();
+      if (transcript) {
+        processTranscript(transcript);
+      } else {
+        setConsecutiveErrors(e => e + 1);
+        runningRef.current = false;
+        if (autoListenRef.current) startListeningCycle();
+        else updatePhase('idle');
+      }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [processBlob]);
+  }, [processTranscript, updatePhase, startListeningCycle]);
 
   // ── Public API ────────────────────────────────────────────────────────────
 
@@ -374,7 +372,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
     setCurrentAudioUrl(null);
     setLiveTranscript(null);
-    vadRecorder.cancelRecording();
+    segSession.cancelSession();
     runningRef.current = false;
     updatePhase('idle');
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -389,9 +387,13 @@ export function useConversationLoop(config: ConversationLoopConfig) {
   const manualFinish = useCallback(async () => {
     if (loopPhaseRef.current !== 'listening') return;
     clearDormancy();
-    const blob = await vadRecorder.stopRecording();
-    if (blob) processBlob(blob);
-  }, [clearDormancy, vadRecorder, processBlob]);
+    updatePhase('transcribing');
+    setLiveTranscript({ user: '…', aura: '' });
+    const transcript = await segSession.stopSession();
+    if (transcript) processTranscript(transcript);
+    else { runningRef.current = false; updatePhase('idle'); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearDormancy, processTranscript, updatePhase]);
 
   const interruptSpeech = useCallback(() => {
     stopBargeInAnalyser();
@@ -410,7 +412,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     return () => {
       clearDormancy();
       stopBargeInAnalyser();
-      vadRecorder.cancelRecording();
+      segSession.cancelSession();
       audioRef.current?.pause();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -418,11 +420,11 @@ export function useConversationLoop(config: ConversationLoopConfig) {
 
   return {
     loopPhase,
-    vadPhase:      vadRecorder.vadPhase as VADPhase,
-    micLevel:      vadRecorder.micLevel,
-    micPermission: vadRecorder.state.micPermission,
-    durationMs:    vadRecorder.state.durationMs,
-    liveTranscript,
+    vadPhase:      segSession.vadPhase as VADPhase,
+    micLevel:      segSession.micLevel,
+    micPermission: segSession.micPermission,
+    durationMs:    segSession.durationMs,
+    liveTranscript: liveTranscript ?? (segSession.liveTranscript ? { user: segSession.liveTranscript, aura: '' } : null),
     currentAudioUrl,
     consecutiveErrors,
     startConversation,

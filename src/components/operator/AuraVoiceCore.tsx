@@ -35,6 +35,7 @@ import { useVoiceRuntime } from '../../hooks/useVoiceRuntime';
 import { useRuntimeStatus } from '../../hooks/useRuntimeStatus';
 import { useVoiceRecorder } from '../../hooks/useVoiceRecorder';
 import { useVoiceActivityRecorder } from '../../hooks/useVoiceActivityRecorder';
+import { useSegmentedVoiceSession } from '../../hooks/useSegmentedVoiceSession';
 import { useWakePhrase, DEFAULT_WAKE_PHRASES } from '../../hooks/useWakePhrase';
 import { useVoiceHotkey } from '../../hooks/useVoiceHotkey';
 import { useConversationLoop } from '../../hooks/useConversationLoop';
@@ -227,6 +228,17 @@ export function AuraVoiceCore({
     maxDurationMs:      voiceSettings.maxRecordingDurationMs,
     onAutoStop:         () => { onAutoStopRef.current?.(); },
   });
+
+  // Segmented session for one-shot long speech (QA3)
+  const segmentedOneShot = useSegmentedVoiceSession({
+    segmentMs:          voiceSettings.segmentLengthMs ?? 8_000,
+    silenceThresholdMs: voiceSettings.silenceThresholdMs,
+    minSpeechMs:        600,
+    maxDurationMs:      voiceSettings.maxThoughtMs ?? 90_000,
+    cleanupEnabled:     voiceSettings.cleanupEnabled ?? true,
+    onAutoStop:         () => { onAutoStopRef.current?.(); },
+  });
+
   const oneshotRecorder = voiceSettings.autoStopEnabled ? vadRecorder : manualRecorder;
 
   // ── Wake phrase ────────────────────────────────────────────────────────────
@@ -374,11 +386,16 @@ export function AuraVoiceCore({
     }
     if (runningRef.current || (oneShotPhase !== 'idle' && oneShotPhase !== 'interrupted')) return;
     setLiveTranscriptOS(null); setOneShotPhase('connecting');
-    await oneshotRecorder.startRecording();
+    // Use segmented session for VAD auto-stop; manual recorder otherwise
+    if (voiceSettings.autoStopEnabled) {
+      await segmentedOneShot.startSession();
+    } else {
+      await manualRecorder.startRecording();
+    }
     recordStartRef.current = Date.now();
     setOneShotPhase('recording');
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [oneShotPhase, oneshotRecorder, currentAudioUrl, voiceSettings.interruptEnabled]);
+  }, [oneShotPhase, segmentedOneShot, manualRecorder, currentAudioUrl, voiceSettings.interruptEnabled, voiceSettings.autoStopEnabled]);
 
   useEffect(() => { handleOneShotStartRef.current = handleOneShotStart; }, [handleOneShotStart]);
 
@@ -386,12 +403,54 @@ export function AuraVoiceCore({
     if (oneShotPhase !== 'recording' || runningRef.current) return;
     const elapsed = recordStartRef.current ? Date.now() - recordStartRef.current : 0;
     if (elapsed < 400) { notifyVoiceError('Hold Speak a moment — say your message first.'); return; }
-    const blob = await oneshotRecorder.stopRecording();
-    if (!blob) { notifyVoiceError('No audio captured.'); setOneShotPhase('idle'); return; }
-    await processOneShotBlob(blob, elapsed);
-  }, [oneShotPhase, oneshotRecorder, processOneShotBlob]);
 
-  // VAD auto-stop for one-shot
+    if (voiceSettings.autoStopEnabled) {
+      // Segmented path: stopSession() returns the assembled transcript
+      setOneShotPhase('transcribing');
+      setLiveTranscriptOS({ user: '…', aura: '' });
+      const transcript = await segmentedOneShot.stopSession();
+      if (!transcript) {
+        notifyVoiceError('No speech detected. Try speaking closer to the microphone.');
+        setOneShotPhase('idle'); setLiveTranscriptOS(null); return;
+      }
+      // Run chat + TTS with already-transcribed text
+      runningRef.current = true;
+      setLiveTranscriptOS({ user: transcript, aura: '' });
+      setOneShotPhase('thinking');
+      const chatResult = await openAIVoiceSessionService.createChatResponse(
+        transcript, voiceSettingsRef.current.responseStyle ?? 'normal',
+      );
+      if (!chatResult.success || !chatResult.text) {
+        notifyVoiceError(chatResult.error ?? 'AI response failed.');
+        setOneShotPhase('idle'); runningRef.current = false; return;
+      }
+      const turn: VoiceConversationTurn = {
+        id: `turn-${Date.now()}`, userText: transcript, auraText: chatResult.text,
+        timestamp: new Date().toISOString(), chatLatencyMs: chatResult.latencyMs,
+      };
+      addTurn(turn);
+      setLiveTranscriptOS({ user: transcript, aura: chatResult.text });
+      voiceTranscriptLogService.logTurn({ userText: transcript, auraText: chatResult.text, durationMs: elapsed, chatLatencyMs: chatResult.latencyMs });
+      const ttsResult = await openAIVoiceSessionService.synthesizeSpeech(chatResult.text, voiceSettingsRef.current.ttsVoice);
+      if (!ttsResult.success || !ttsResult.audioBlobUrl) { setOneShotPhase('idle'); runningRef.current = false; return; }
+      if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
+      setCurrentAudioUrl(ttsResult.audioBlobUrl);
+      setOneShotPhase('speaking');
+      const audio = new Audio(ttsResult.audioBlobUrl);
+      audioRef.current = audio;
+      audio.onended = () => { setOneShotPhase('idle'); URL.revokeObjectURL(ttsResult.audioBlobUrl!); setCurrentAudioUrl(null); runningRef.current = false; };
+      audio.onerror = () => { setOneShotPhase('idle'); runningRef.current = false; };
+      audio.play().catch(() => { setOneShotPhase('idle'); runningRef.current = false; });
+    } else {
+      // Manual recorder path: use blob-based pipeline
+      const blob = await manualRecorder.stopRecording();
+      if (!blob) { notifyVoiceError('No audio captured.'); setOneShotPhase('idle'); return; }
+      await processOneShotBlob(blob, elapsed);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oneShotPhase, segmentedOneShot, manualRecorder, processOneShotBlob, currentAudioUrl, voiceSettings.autoStopEnabled, addTurn]);
+
+  // VAD auto-stop for one-shot (segmented session fires onAutoStop)
   useEffect(() => {
     onAutoStopRef.current = () => {
       if (oneShotPhase === 'recording' && !runningRef.current) handleOneShotStop();
@@ -440,12 +499,16 @@ export function AuraVoiceCore({
   const handleReject  = () => { if (activeTrayApproval) runtime.resolveApproval(activeTrayApproval.id, 'rejected'); };
 
   // ── Derived state ──────────────────────────────────────────────────────────
-  const micDenied      = conversationModeEnabled ? loop.micPermission === 'denied'      : oneshotRecorder.state.micPermission === 'denied';
-  const micUnsupported = conversationModeEnabled ? loop.micPermission === 'unsupported' : oneshotRecorder.state.micPermission === 'unsupported';
-  const vadPhase       = conversationModeEnabled ? loop.vadPhase  : (voiceSettings.autoStopEnabled ? vadRecorder.vadPhase : 'recording' as const);
-  const micLevel       = conversationModeEnabled ? loop.micLevel  : (voiceSettings.autoStopEnabled ? vadRecorder.micLevel : 0);
-  const durationMs     = conversationModeEnabled ? loop.durationMs : oneshotRecorder.state.durationMs;
-  const liveTranscript = conversationModeEnabled ? loop.liveTranscript : liveTranscriptOS;
+  const oneshotMicPermission = voiceSettings.autoStopEnabled ? segmentedOneShot.micPermission : oneshotRecorder.state.micPermission;
+  const micDenied      = conversationModeEnabled ? loop.micPermission === 'denied'      : oneshotMicPermission === 'denied';
+  const micUnsupported = conversationModeEnabled ? loop.micPermission === 'unsupported' : oneshotMicPermission === 'unsupported';
+  const vadPhase       = conversationModeEnabled ? loop.vadPhase  : (voiceSettings.autoStopEnabled ? segmentedOneShot.vadPhase : 'recording' as const);
+  const micLevel       = conversationModeEnabled ? loop.micLevel  : (voiceSettings.autoStopEnabled ? segmentedOneShot.micLevel : 0);
+  const durationMs     = conversationModeEnabled ? loop.durationMs : (voiceSettings.autoStopEnabled ? segmentedOneShot.durationMs : oneshotRecorder.state.durationMs);
+  // Show partial segment transcript during one-shot long recording
+  const liveTranscript = conversationModeEnabled
+    ? loop.liveTranscript
+    : (liveTranscriptOS ?? (segmentedOneShot.liveTranscript ? { user: segmentedOneShot.liveTranscript, aura: '' } : null));
 
   const effectivePhaseForVisualizer = conversationModeEnabled
     ? loopPhaseVisualizer(loop.loopPhase)

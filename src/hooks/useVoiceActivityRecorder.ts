@@ -85,6 +85,7 @@ function detectMimeType(): string {
   const types = [
     'audio/webm;codecs=opus',
     'audio/webm',
+    'audio/mp4',              // WebView2 on Windows often prefers mp4
     'audio/ogg;codecs=opus',
     'audio/ogg',
   ];
@@ -229,17 +230,23 @@ export function useVoiceActivityRecorder(config: Partial<VADConfig> = {}): UseVo
     }
 
     // ── MediaRecorder ─────────────────────────────────────────────────────────
-    // Use low bitrate (16 kbps) to keep audio files small for Whisper transfer.
-    // 16 kbps opus is excellent quality for speech recognition.
-    // 30s at 16kbps = ~60 KB binary (vs ~200-400 KB at default quality).
-    // This dramatically reduces Tauri IPC transfer size and Whisper processing time.
+    // Do not force a specific bitrate — WebView2 may reject very low values
+    // (e.g. 16 kbps causes silent failures in some WebView2 versions).
+    // Let the encoder choose its own bitrate for the detected codec.
     const recorderOptions: MediaRecorderOptions = {};
     if (mimeTypeRef.current) recorderOptions.mimeType = mimeTypeRef.current;
-    recorderOptions.audioBitsPerSecond = 16_000;
     const recorder = new MediaRecorder(stream, recorderOptions);
     mediaRecorderRef.current = recorder;
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunksRef.current.push(e.data);
+    };
+    recorder.onerror = () => {
+      // MediaRecorder encoding failure — stop and surface error
+      cleanup();
+      setState(s => ({ ...s, isRecording: false, error: 'Audio encoding failed. Try again.' }));
+      setVadPhase('idle');
+      resolveRef.current?.(null);
+      resolveRef.current = null;
     };
     recorder.start(100);
 

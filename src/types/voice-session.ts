@@ -110,6 +110,11 @@ export interface VoiceConversationSettings {
   interruptEnabled: boolean;        // allow barge-in while AURA is speaking, default true
   wakePhrase: boolean;              // continuous wake phrase listening, default false
   responseStyle: 'brief' | 'normal' | 'detailed';  // controls AURA response length, default 'normal'
+  // Phase 3E QA3 additions — segmented voice session
+  segmentLengthMs?: number;   // rolling segment size, default 8000
+  maxThoughtMs?: number;      // max full thought duration, default 90000
+  cleanupEnabled?: boolean;   // apply filler/vocab cleanup per segment, default true
+  removeFillerWords?: boolean; // subset of cleanup: remove um/uh/etc, default true
 }
 
 export const DEFAULT_VOICE_SETTINGS: VoiceConversationSettings = {
@@ -123,6 +128,11 @@ export const DEFAULT_VOICE_SETTINGS: VoiceConversationSettings = {
   interruptEnabled: true,
   wakePhrase: false,
   responseStyle: 'normal',
+  // Phase 3E QA3
+  segmentLengthMs: 8_000,
+  maxThoughtMs: 90_000,
+  cleanupEnabled: true,
+  removeFillerWords: true,
 };
 
 // ─── Session ──────────────────────────────────────────────────────────────────
