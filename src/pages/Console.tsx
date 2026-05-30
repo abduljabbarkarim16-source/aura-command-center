@@ -9,19 +9,13 @@
  *   chatConsole  → Chat stream + composer (opened from Voice Core)
  */
 
-import React, { useState, useMemo, Fragment } from 'react';
-import { Settings2, ArrowLeft } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
 import { mockMessages } from '../store/mockData';
 
-import { AuraVoiceCore }       from '../components/operator/AuraVoiceCore';
-import { AdminPanelOverlay }   from '../components/operator/AdminPanelOverlay';
-import { AuraComposer }        from '../components/operator/AuraComposer';
-import { OperatorRail }        from '../components/operator/OperatorRail';
-import { TechnicalDrawer }     from '../components/operator/TechnicalDrawer';
-import { AssistantMessage }    from '../components/operator/AssistantMessage';
-import { SessionDivider }      from '../components/operator/SystemEventCard';
-import { AuraPresenceDot }     from '../components/operator/AuraVoiceVisualizer';
-import { cn }                  from '../lib/utils';
+import { AuraVoiceCore }        from '../components/operator/AuraVoiceCore';
+import { AdminPanelOverlay }    from '../components/operator/AdminPanelOverlay';
+import { TechnicalDrawer }      from '../components/operator/TechnicalDrawer';
+import { AuraCommandConsole }   from '../components/operator/AuraCommandConsole';
 
 import type {
   AuraMessage, SystemMessage, AgentHandoffMessage, ToolStatusMessage,
@@ -121,9 +115,9 @@ export function Console() {
   // AURA opens directly into Voice Core — no initiation gate
   const [mode,            setMode]            = useState<ConsoleMode>('voiceCore');
   const [isDrawerOpen,    setIsDrawerOpen]    = useState(false);
-  const [isRailCollapsed, setIsRailCollapsed] = useState(true);
-  const [isAdminOpen,     setIsAdminOpen]     = useState(false);
-  const [auraState] = useState<VisualizerState>('idle');
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_auraState] = useState<VisualizerState>('idle');
 
   const messages = useMemo(() => toLegacyMessages(), []);
 
@@ -132,7 +126,7 @@ export function Console() {
     return (
       <div className="flex h-full min-h-0 w-full overflow-hidden bg-zinc-950">
         <AuraVoiceCore
-          auraState={auraState}
+          auraState={_auraState}
           onOpenConsole={() => setMode('chatConsole')}
           onOpenAdminPanel={() => setIsAdminOpen(true)}
           onOpenTechnicalDrawer={() => {
@@ -158,104 +152,20 @@ export function Console() {
   }
 
   // ── Chat Console mode ────────────────────────────────────────────
+  // Chat console mode — Claude Code-style clean layout
   return (
-    <div className="flex h-full min-h-0 w-full overflow-hidden bg-zinc-950/20">
-
-      {/* Center stream */}
-      <div className="flex-1 flex flex-col min-w-0 h-full relative">
-
-        {/* Top bar */}
-        <div className="absolute top-0 left-0 right-0 h-14 bg-gradient-to-b from-zinc-950 via-zinc-950/85 to-transparent z-10 flex items-center justify-between px-6 pointer-events-none">
-          <div className="flex items-center gap-3 pointer-events-auto">
-            <button
-              onClick={() => setMode('voiceCore')}
-              className={cn(
-                'flex items-center gap-2 px-3 py-1.5',
-                'bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/25',
-                'text-indigo-400 hover:text-indigo-300 rounded-lg text-[12px] font-medium transition-colors',
-              )}
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              Voice Core
-            </button>
-
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 flex items-center justify-center">
-                <AuraPresenceDot state={auraState} />
-              </div>
-              <div className="flex flex-col">
-                <span className="text-[13px] font-semibold tracking-wide text-zinc-200">AURA</span>
-                <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Console
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 pointer-events-auto">
-            <button
-              onClick={() => setIsAdminOpen(true)}
-              className={cn(
-                'flex items-center gap-2 px-3 py-1.5',
-                'bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800/80',
-                'text-zinc-400 hover:text-zinc-200 rounded-lg text-[13px] font-medium transition backdrop-blur-md',
-              )}
-            >
-              Admin
-            </button>
-            <button
-              onClick={() => setIsDrawerOpen(true)}
-              className={cn(
-                'flex items-center gap-2 px-3 py-1.5',
-                'bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800/80',
-                'text-zinc-400 hover:text-zinc-200 rounded-lg text-[13px] font-medium transition backdrop-blur-md',
-              )}
-            >
-              <Settings2 className="w-4 h-4" />
-              Details
-            </button>
-          </div>
-        </div>
-
-        {/* Message stream */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar pt-20 pb-4">
-          <div className="max-w-4xl mx-auto w-full px-4 flex flex-col gap-4">
-            <SessionDivider label="Session" />
-            {messages.map(msg => (
-              <Fragment key={msg.id}>
-                <AssistantMessage msg={msg} />
-              </Fragment>
-            ))}
-            <div className="h-4" />
-          </div>
-        </div>
-
-        {/* Composer */}
-        <div className="shrink-0 pt-2 pb-6 px-4 bg-gradient-to-t from-zinc-950 via-zinc-950 to-transparent">
-          <div className="max-w-4xl mx-auto w-full">
-            <AuraComposer />
-          </div>
-        </div>
-      </div>
-
-      {/* Right Rail */}
-      <OperatorRail
-        isCollapsed={isRailCollapsed}
-        onToggle={() => setIsRailCollapsed(prev => !prev)}
+    <div className="flex h-full min-h-0 w-full overflow-hidden bg-zinc-950">
+      <AuraCommandConsole
+        messages={messages}
+        onBack={() => setMode('voiceCore')}
+        onOpenAdmin={() => setIsAdminOpen(true)}
+        onOpenDetails={() => { setIsAdminOpen(false); setIsDrawerOpen(true); }}
       />
-
-      {/* Admin Panel Overlay */}
       <AdminPanelOverlay
         isOpen={isAdminOpen}
         onClose={() => setIsAdminOpen(false)}
-        onOpenTechnicalDrawer={() => {
-          setIsAdminOpen(false);
-          setIsDrawerOpen(true);
-        }}
+        onOpenTechnicalDrawer={() => { setIsAdminOpen(false); setIsDrawerOpen(true); }}
       />
-
-      {/* Technical Drawer */}
       <TechnicalDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
     </div>
   );
