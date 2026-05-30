@@ -293,6 +293,53 @@ pub fn list_allowed_commands() -> Vec<AllowedCommandEntry> {
         .collect()
 }
 
+/// Agent CLI allowlist — only these binaries may be checked for availability.
+/// No arbitrary shell. No system commands. No user-supplied binaries.
+const AGENT_CLI_ALLOWLIST: &[&str] = &["claude", "codex"];
+
+#[derive(Serialize)]
+pub struct CliAvailabilityResult {
+    pub available: bool,
+    pub path: Option<String>,
+}
+
+/// Check if an agent CLI binary (claude, codex) is available on PATH.
+/// Only allowed binaries from AGENT_CLI_ALLOWLIST are accepted.
+/// Does not launch or execute the binary.
+#[tauri::command]
+pub fn check_cli_available(binary: String) -> CliAvailabilityResult {
+    let lower = binary.to_lowercase();
+
+    // Strict allowlist check — reject anything not explicitly permitted
+    if !AGENT_CLI_ALLOWLIST.iter().any(|&b| b == lower.as_str()) {
+        return CliAvailabilityResult { available: false, path: None };
+    }
+
+    // Reject metacharacters (defensive — allowlist already covers this)
+    if contains_metacharacters(&binary) {
+        return CliAvailabilityResult { available: false, path: None };
+    }
+
+    let check_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+    let output = Command::new(check_cmd).arg(&binary).output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let path = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            CliAvailabilityResult {
+                available: true,
+                path: if path.is_empty() { None } else { Some(path) },
+            }
+        }
+        _ => CliAvailabilityResult { available: false, path: None },
+    }
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Returns the project root directory.

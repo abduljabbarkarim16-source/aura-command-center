@@ -83,6 +83,7 @@ pub fn run() {
       commands::get_workspace_info,
       commands::check_command_available,
       commands::list_allowed_commands,
+      commands::check_cli_available,
       config_commands::save_openai_key,
       config_commands::openai_key_is_configured,
       config_commands::delete_openai_key,

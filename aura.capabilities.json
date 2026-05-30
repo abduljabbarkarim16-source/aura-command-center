@@ -1,0 +1,73 @@
+{
+  "version": "0.3.5",
+  "phase": "3E",
+  "updated": "2026-05-30",
+  "agent": "Claude (Anthropic · claude-sonnet-4-6)",
+  "voice": {
+    "stt": "openai-whisper",
+    "tts": "openai-tts-1",
+    "chat": "gpt-4o-mini",
+    "vadLite": true,
+    "noiseFloorCalibration": true,
+    "bargIn": true,
+    "wakePhrase": "prototype",
+    "maxDurationMs": 45000,
+    "hotkey": "Ctrl+Shift+Space",
+    "transcriptPersistence": "localStorage (opt-in)",
+    "realtimeWebRTC": "planned-phase-3f"
+  },
+  "providers": {
+    "openai": { "status": "active", "keyLocation": "Rust/AppData (never frontend)" },
+    "gemini": { "status": "pending-credit", "keyLocation": "Rust/AppData" },
+    "elevenlabs": { "status": "optional-not-wired", "keyLocation": "Rust/AppData" },
+    "makecom": { "status": "active", "webhookLocation": "Rust/AppData (never logged)" }
+  },
+  "nativeBridge": {
+    "status": "active",
+    "allowlist": ["read_file", "list_directory", "check_cli_available"],
+    "shell": "safe-allowlist-only"
+  },
+  "agentCli": {
+    "claude": { "status": "availability-check-only", "spawnReady": false },
+    "codex": { "status": "availability-check-only", "spawnReady": false }
+  },
+  "notifications": {
+    "persistence": "localStorage",
+    "maxHistory": 500,
+    "types": ["info", "success", "warning", "error", "approval_required", "task_update", "voice_event"]
+  },
+  "contextCompression": {
+    "status": "foundation-ready",
+    "autoSend": false,
+    "methods": ["strip-html", "dedup-lines", "shorten-urls", "compress-logs", "mask-secrets"]
+  },
+  "reminders": {
+    "status": "foundation-ready",
+    "persistence": "localStorage",
+    "useCases": ["usage-limit-reset", "resume-task", "follow-up-build", "check-automation"]
+  },
+  "operatorLayout": {
+    "leftRail": true,
+    "centerVoiceCore": true,
+    "rightPanel": {
+      "status": "active",
+      "tabs": ["notifications", "tasks", "transcript", "planning", "terminal", "diff", "files", "logs"]
+    }
+  },
+  "skills": {
+    "voice": "active",
+    "make": "active",
+    "native-commands": "active-safe",
+    "memory": "active",
+    "claude-cli": "foundation-only",
+    "codex-cli": "foundation-only",
+    "browser-workspace": "planned-phase-4"
+  },
+  "commandPolicy": {
+    "destructive": "approval-required",
+    "externalMessages": "approval-required",
+    "fileRead": "allowed",
+    "fileWrite": "approval-required",
+    "shellArbitrary": "blocked"
+  }
+}
