@@ -1,5 +1,5 @@
 /**
- * OpenAIVoiceSessionService — AURA Phase 3C
+ * OpenAIVoiceSessionService — AURA Phase 3D
  *
  * Orchestrates OpenAI STT → Chat → TTS via the Tauri backend.
  *
@@ -11,8 +11,8 @@
  * - Object URLs are revoked by the caller after playback
  * - Conversation history in memory only; not persisted unless user enables it
  *
+ * Phase 3D: createChatResponse now accepts responseStyle for prompt tuning.
  * Provider: OpenAI for all three (STT/Chat/TTS) — simplest MVP path.
- * Anthropic can be added for the chat step in a future pass.
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -69,7 +69,10 @@ class OpenAIVoiceSessionServiceImpl {
 
   // ── Chat: get AURA response via Tauri backend ─────────────────────────────
 
-  async createChatResponse(transcript: string): Promise<VoiceChatResult> {
+  async createChatResponse(
+    transcript: string,
+    responseStyle: 'brief' | 'normal' | 'detailed' = 'normal',
+  ): Promise<VoiceChatResult> {
     if (!transcript.trim()) return { success: false, error: 'Empty transcript' };
     const start = Date.now();
     try {
@@ -79,6 +82,7 @@ class OpenAIVoiceSessionServiceImpl {
       const text = await invoke<string>('openai_chat_response', {
         transcript: transcript.trim(),
         history: historySlice,
+        responseStyle,
       });
 
       // Store this turn in history
@@ -130,7 +134,7 @@ class OpenAIVoiceSessionServiceImpl {
     }
 
     // Chat
-    const chatResult = await this.createChatResponse(sttResult.text);
+    const chatResult = await this.createChatResponse(sttResult.text, settings.responseStyle ?? 'normal');
     if (!chatResult.success || !chatResult.text) {
       return { success: false, error: chatResult.error ?? 'Chat failed' };
     }

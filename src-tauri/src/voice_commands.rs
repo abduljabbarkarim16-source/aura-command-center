@@ -1,4 +1,4 @@
-/// AURA Voice Commands — Phase 3C
+/// AURA Voice Commands — Phase 3D
 ///
 /// Tauri backend commands for OpenAI voice operations.
 /// The API key is loaded from the process environment here in Rust,
@@ -6,8 +6,8 @@
 ///
 /// Security invariants:
 ///   - Key is never logged, returned, or serialized to frontend
-///   - Audio bytes are capped at 10 MB input
-///   - Response tokens capped at 150 for chat
+///   - Audio bytes are capped at 25 MB input (Whisper API actual limit)
+///   - Response tokens capped at 300 for chat (raised from 150 in Phase 3D)
 ///   - Text input to TTS capped at 4096 chars
 ///   - No source code or credentials in prompts
 ///   - One call per command invocation; caller controls retries
@@ -22,18 +22,34 @@
 
 use serde::{Deserialize, Serialize};
 
-const MAX_AUDIO_BYTES: usize = 10 * 1024 * 1024; // 10 MB
+const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024; // 25 MB — Whisper API actual limit
 const MAX_TEXT_LEN: usize = 4096;
-const MAX_RESPONSE_TOKENS: u32 = 150;
+const MAX_RESPONSE_TOKENS: u32 = 300; // Phase 3D: raised from 150 to support detailed responses
 const CHAT_MODEL: &str = "gpt-4o-mini";
 const TTS_MODEL: &str = "tts-1";
 const STT_MODEL: &str = "whisper-1";
 
-const AURA_SYSTEM_PROMPT: &str =
-    "You are AURA, a concise desktop operator assistant. \
-     Speak naturally, keep responses short (1-3 sentences), \
-     and ask before taking actions. \
-     Do not claim to perform actions you have not performed.";
+// ─── System prompt ─────────────────────────────────────────────────────────────
+// Phase 3D: improved voice-first prompt with no filler phrases
+
+const AURA_SYSTEM_PROMPT_BASE: &str =
+    "You are AURA, a concise voice assistant and AI desktop operator. \
+     You are speaking directly to the user through audio. \
+     Rules: \
+     - Respond as if speaking naturally, not writing. \
+     - Keep responses SHORT — 1 to 3 sentences maximum unless asked to elaborate. \
+     - Never use markdown, bullet points, or formatted lists. \
+     - Never say 'Certainly!' or 'Of course!' or similar filler phrases. \
+     - Ask one clarifying question at a time if you need more information. \
+     - Do not claim to perform actions you have not actually performed. \
+     - If you do not know something, say so clearly and briefly.";
+
+const RESPONSE_STYLE_BRIEF: &str =
+    " Keep your response to 1 sentence. Be extremely concise.";
+const RESPONSE_STYLE_NORMAL: &str =
+    " Aim for 2 to 3 sentences.";
+const RESPONSE_STYLE_DETAILED: &str =
+    " You may use up to 5 sentences if the topic requires it.";
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
 
@@ -109,11 +125,13 @@ pub async fn openai_transcribe_audio(
 
 /// Generate a short AURA chat response for a transcript.
 /// History is an optional array of prior {role, content} messages (max 6 sent).
+/// response_style controls response length: "brief" | "normal" | "detailed" (default "normal").
 /// Returns the response text or an error string.
 #[tauri::command]
 pub async fn openai_chat_response(
     transcript: String,
     history: Vec<ChatMessage>,
+    response_style: Option<String>,
 ) -> Result<String, String> {
     if transcript.trim().is_empty() {
         return Err("Transcript is empty".to_string());
@@ -122,9 +140,17 @@ pub async fn openai_chat_response(
     let key = get_openai_key()?;
     let client = reqwest::Client::new();
 
+    // Build dynamic system prompt based on response style
+    let style_suffix = match response_style.as_deref().unwrap_or("normal") {
+        "brief"    => RESPONSE_STYLE_BRIEF,
+        "detailed" => RESPONSE_STYLE_DETAILED,
+        _          => RESPONSE_STYLE_NORMAL, // "normal" and anything else
+    };
+    let system_prompt = format!("{}{}", AURA_SYSTEM_PROMPT_BASE, style_suffix);
+
     // Build messages — system + last 6 history turns + current user turn
     let mut messages: Vec<serde_json::Value> = vec![
-        serde_json::json!({ "role": "system", "content": AURA_SYSTEM_PROMPT }),
+        serde_json::json!({ "role": "system", "content": system_prompt }),
     ];
     for msg in history.iter().take(6) {
         messages.push(serde_json::json!({ "role": msg.role, "content": msg.content }));

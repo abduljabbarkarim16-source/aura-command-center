@@ -1,11 +1,14 @@
 /**
- * AuraVoiceCore — Phase 3C Voice Conversation MVP
+ * AuraVoiceCore — Phase 3D Voice Conversation Upgrade
  *
- * Adds real voice conversation on top of the Phase 2F runtime foundation.
- * When "Voice Conversation" is enabled in settings:
- *   Speak button → record audio → STT → chat → TTS → play audio
- *
- * When disabled: existing mock/demo behaviour is preserved.
+ * Phase 3D additions over Phase 3C:
+ *  - VAD-lite auto-stop on silence (useVoiceActivityRecorder)
+ *  - Interruptible AURA speech (barge-in)
+ *  - Wake phrase prototype (useWakePhrase)
+ *  - Better long-speech blob handling (25 MB, descriptive errors)
+ *  - Improved button labels and VAD phase UI
+ *  - Response style (brief / normal / detailed) passed to backend
+ *  - Developer-only Make.com test event button
  *
  * Security: API key never appears in this component.
  * All OpenAI calls route through Tauri backend (voice_commands.rs).
@@ -15,7 +18,7 @@ import React, { useState, useEffect, useRef, useCallback, Fragment } from 'react
 import {
   Mic, MicOff, Terminal, Settings2, LayoutGrid,
   Shield, Bot, Database, Wrench, ChevronDown, ChevronUp,
-  Eye, Radio, Trash2,
+  Eye, Radio, Trash2, Zap,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { AuraVoiceVisualizer } from './AuraVoiceVisualizer';
@@ -28,6 +31,8 @@ import { NotificationToast } from './NotificationToast';
 import { useVoiceRuntime } from '../../hooks/useVoiceRuntime';
 import { useRuntimeStatus } from '../../hooks/useRuntimeStatus';
 import { useVoiceRecorder } from '../../hooks/useVoiceRecorder';
+import { useVoiceActivityRecorder } from '../../hooks/useVoiceActivityRecorder';
+import { useWakePhrase, DEFAULT_WAKE_PHRASES } from '../../hooks/useWakePhrase';
 import { openAIVoiceSessionService } from '../../services/voice/OpenAIVoiceSessionService';
 import type { VoiceRuntimeState } from '../../types/voice-runtime';
 import type { VoiceConversationTurn, VoiceConversationSettings } from '../../types/voice-session';
@@ -37,6 +42,9 @@ import { DEFAULT_VOICE_SETTINGS } from '../../types/voice-session';
 
 const GREETING_SESSION_KEY = 'aura_greeting_shown';
 const MAX_VISIBLE_TURNS = 5;
+// Phase 3D: Whisper API actual limit is 25 MB; warn at 24 MB
+const MAX_BLOB_BYTES = 24 * 1024 * 1024;
+const LONG_SPEECH_BLOB_BYTES = 500 * 1024; // > ~10s of compressed audio
 
 // ─── State mapping ────────────────────────────────────────────────────────────
 
@@ -71,17 +79,26 @@ function runtimeStateLabel(state: VoiceRuntimeState): string {
   }
 }
 
-// ─── Conversation status label ────────────────────────────────────────────────
+// ─── Conversation phase ───────────────────────────────────────────────────────
 
-type ConvPhase = 'idle' | 'connecting' | 'recording' | 'transcribing' | 'thinking' | 'speaking' | 'error';
+type ConvPhase =
+  | 'idle'
+  | 'connecting'
+  | 'recording'
+  | 'transcribing'
+  | 'thinking'
+  | 'speaking'
+  | 'interrupted'
+  | 'error';
 
 function convPhaseLabel(phase: ConvPhase): string {
   switch (phase) {
-    case 'connecting':   return 'Starting mic…';
+    case 'connecting':   return 'Starting…';
     case 'recording':    return 'Listening…';
-    case 'transcribing': return 'Transcribing…';
+    case 'transcribing': return 'Processing…';
     case 'thinking':     return 'Thinking…';
     case 'speaking':     return 'Speaking…';
+    case 'interrupted':  return 'Interrupted';
     case 'error':        return 'Error';
     default:             return '';
   }
@@ -94,6 +111,7 @@ function convPhaseVisualizer(phase: ConvPhase): VisualizerState {
     case 'transcribing': return 'thinking';
     case 'thinking':     return 'thinking';
     case 'speaking':     return 'speaking';
+    case 'interrupted':  return 'thinking';
     case 'error':        return 'error';
     default:             return 'idle';
   }
@@ -131,7 +149,6 @@ export function AuraVoiceCore({
   const status  = useRuntimeStatus();
 
   // ── Voice conversation state ───────────────────────────────────────────────
-  // Voice is always on by default; respect other persisted preferences (ttsVoice etc.)
   const [voiceSettings, setVoiceSettings] = useState<VoiceConversationSettings>(() => {
     try {
       const stored = localStorage.getItem('voice.conversation.settings');
@@ -144,13 +161,11 @@ export function AuraVoiceCore({
   const [turns, setTurns]                 = useState<VoiceConversationTurn[]>([]);
   const [convOpen, setConvOpen]           = useState(false);
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
-  // Live transcript for current exchange — shown in the transcript panel
   const [liveTranscript, setLiveTranscript] = useState<{ user: string; aura: string } | null>(null);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const runningRef = useRef(false);
-  // Tracks when mic recording actually started (for minimum-duration enforcement)
   const recordStartTimeRef = useRef<number | null>(null);
-  // Stable ref so the one-time greeting effect can read the latest settings
   const voiceSettingsRef = useRef(voiceSettings);
   useEffect(() => { voiceSettingsRef.current = voiceSettings; }, [voiceSettings]);
 
@@ -159,14 +174,62 @@ export function AuraVoiceCore({
   const [missionExpanded, setMissionExpanded] = useState(false);
   const greetedRef = useRef(false);
 
-  // ── Recorder ──────────────────────────────────────────────────────────────
-  const recorder = useVoiceRecorder(voiceSettings.maxRecordingDurationMs);
+  // ── Manual recorder (push-to-talk fallback) ───────────────────────────────
+  const manualRecorder = useVoiceRecorder(voiceSettings.maxRecordingDurationMs);
+
+  // ── VAD recorder (auto-stop on silence) ───────────────────────────────────
+  // onAutoStop is set after component initialization (defined below)
+  const onAutoStopRef = useRef<(() => void) | undefined>(undefined);
+  const vadRecorder = useVoiceActivityRecorder({
+    silenceThresholdMs: voiceSettings.silenceThresholdMs,
+    minSpeechMs: 400,
+    maxDurationMs: voiceSettings.maxRecordingDurationMs,
+    onAutoStop: () => { onAutoStopRef.current?.(); },
+  });
+
+  // Active recorder — VAD if enabled, manual otherwise
+  const recorder = voiceSettings.autoStopEnabled ? vadRecorder : manualRecorder;
+
+  // ── Wake phrase ────────────────────────────────────────────────────────────
+  const wakePhrase = useWakePhrase({
+    enabled: voiceSettings.wakePhrase,
+    phrases: DEFAULT_WAKE_PHRASES,
+    onActivated: useCallback(() => {
+      // Wake phrase fired — start recording if idle
+      // Note: this is async but we can't await here; handleSpeakStart is robust
+      if (convPhase === 'idle' && !runningRef.current) {
+        // Small delay to ensure recognition stops first
+        setTimeout(() => {
+          if (convPhase === 'idle' && !runningRef.current) {
+            handleSpeakStartRef.current?.();
+          }
+        }, 100);
+      }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [convPhase]),
+    onUnavailable: useCallback(() => {
+      console.warn('[WakePhrase] SpeechRecognition not available in this environment (WebView2 may not support it)');
+    }, []),
+  });
+
+  // Stable ref so wake phrase onActivated can call the latest handleSpeakStart
+  const handleSpeakStartRef = useRef<(() => Promise<void>) | null>(null);
 
   // ── Persist voice settings ────────────────────────────────────────────────
   useEffect(() => {
     try { localStorage.setItem('voice.conversation.settings', JSON.stringify(voiceSettings)); }
     catch { /* ignore */ }
   }, [voiceSettings]);
+
+  // ── Wake phrase lifecycle ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (voiceSettings.wakePhrase && voiceSettings.enabled && convPhase === 'idle' && !runningRef.current) {
+      wakePhrase.start();
+    } else if (!voiceSettings.wakePhrase || convPhase !== 'idle') {
+      wakePhrase.stop();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceSettings.wakePhrase, voiceSettings.enabled, convPhase]);
 
   // ── Approval data ─────────────────────────────────────────────────────────
   const allApprovals       = runtime.pendingApprovals;
@@ -262,7 +325,7 @@ export function AuraVoiceCore({
       } else {
         runtime.addRuntimeNotification({ type: 'success', title: "AURA online. Ready to assist.", ttl: 5000 });
       }
-    }, 1200); // brief delay so the UI settles before audio starts
+    }, 1200);
 
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -272,8 +335,7 @@ export function AuraVoiceCore({
     if (allApprovals.length === 0) setIsTrayOpen(false);
   }, [allApprovals.length]);
 
-  // If mic permission is denied/unsupported while we thought we were connecting,
-  // reset so the button becomes active again and the error is shown.
+  // If mic permission is denied/unsupported while connecting/recording, reset.
   useEffect(() => {
     const p = recorder.state.micPermission;
     if ((p === 'denied' || p === 'unsupported') &&
@@ -289,37 +351,18 @@ export function AuraVoiceCore({
     };
   }, [currentAudioUrl]);
 
-  // ── Voice conversation handlers ───────────────────────────────────────────
+  // ── Core processing pipeline ──────────────────────────────────────────────
+  // Extracted so both handleSpeakStop and the VAD auto-stop can call it.
 
-  const handleSpeakStart = useCallback(async () => {
-    if (runningRef.current || convPhase !== 'idle') return;
-    setConvError(null);
-    setLiveTranscript(null);
-    setConvPhase('connecting');
-    await recorder.startRecording();
-    recordStartTimeRef.current = Date.now();
-    setConvPhase('recording');
-  }, [convPhase, recorder]);
+  const processBlobRef = useRef<((blob: Blob, durationMs: number) => Promise<void>) | null>(null);
 
-  const handleSpeakStop = useCallback(async () => {
-    if (convPhase !== 'recording') return;
-    if (runningRef.current) return;
-
-    // Minimum 400 ms of recording — prevents the "no audio captured" error
-    // when someone accidentally taps then immediately releases.
-    const elapsed = recordStartTimeRef.current ? Date.now() - recordStartTimeRef.current : 0;
-    if (elapsed < 400) {
-      setConvError('Hold Speak a moment — speak your message, then click Done.');
-      return;
-    }
-
+  const processBlob = useCallback(async (blob: Blob, durationMs: number) => {
     runningRef.current = true;
     setConvPhase('transcribing');
     setLiveTranscript({ user: '…', aura: '' });
 
-    const blob = await recorder.stopRecording();
-
-    if (!blob || blob.size === 0) {
+    // ── Blob size validation ──────────────────────────────────────────────────
+    if (blob.size === 0) {
       setConvPhase('error');
       setConvError('No audio captured. Check mic permissions and try again.');
       setLiveTranscript(null);
@@ -328,7 +371,30 @@ export function AuraVoiceCore({
       return;
     }
 
-    // ── STT ─────────────────────────────────────────────────────────────────
+    if (blob.size < 200 && durationMs > 500) {
+      setConvPhase('error');
+      setConvError('No voice detected — check your microphone level.');
+      setLiveTranscript(null);
+      runningRef.current = false;
+      setTimeout(() => { setConvPhase('idle'); setConvError(null); }, 4000);
+      return;
+    }
+
+    if (blob.size > MAX_BLOB_BYTES) {
+      setConvPhase('error');
+      setConvError('Recording too long — please keep responses under 30 seconds.');
+      setLiveTranscript(null);
+      runningRef.current = false;
+      setTimeout(() => { setConvPhase('idle'); setConvError(null); }, 4000);
+      return;
+    }
+
+    // Show a status hint for long captures
+    if (blob.size > LONG_SPEECH_BLOB_BYTES) {
+      setLiveTranscript({ user: 'Long thought captured, processing…', aura: '' });
+    }
+
+    // ── STT ───────────────────────────────────────────────────────────────────
     const sttResult = await openAIVoiceSessionService.transcribeAudio(blob);
 
     if (!sttResult.success || !sttResult.text?.trim()) {
@@ -343,8 +409,11 @@ export function AuraVoiceCore({
     setLiveTranscript({ user: sttResult.text, aura: '' });
     setConvPhase('thinking');
 
-    // ── Chat ─────────────────────────────────────────────────────────────────
-    const chatResult = await openAIVoiceSessionService.createChatResponse(sttResult.text);
+    // ── Chat ──────────────────────────────────────────────────────────────────
+    const chatResult = await openAIVoiceSessionService.createChatResponse(
+      sttResult.text,
+      voiceSettingsRef.current.responseStyle ?? 'normal',
+    );
 
     if (!chatResult.success || !chatResult.text) {
       setConvPhase('error');
@@ -365,7 +434,7 @@ export function AuraVoiceCore({
     setTurns(prev => [...prev, turn].slice(-MAX_VISIBLE_TURNS));
     setLiveTranscript({ user: sttResult.text, aura: chatResult.text });
 
-    // ── TTS ─────────────────────────────────────────────────────────────────
+    // ── TTS ───────────────────────────────────────────────────────────────────
     const ttsResult = await openAIVoiceSessionService.synthesizeSpeech(
       chatResult.text,
       voiceSettingsRef.current.ttsVoice,
@@ -398,7 +467,77 @@ export function AuraVoiceCore({
       setConvPhase('idle');
       runningRef.current = false;
     });
-  }, [convPhase, recorder, currentAudioUrl]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentAudioUrl]);
+
+  // Keep processBlob in a ref for the VAD auto-stop path
+  useEffect(() => { processBlobRef.current = processBlob; }, [processBlob]);
+
+  // ── handleSpeakStart — with barge-in support ─────────────────────────────
+
+  const handleSpeakStart = useCallback(async () => {
+    // Allow barge-in: if AURA is speaking, interrupt first
+    if (convPhase === 'speaking' && voiceSettings.interruptEnabled) {
+      audioRef.current?.pause();
+      if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
+      setCurrentAudioUrl(null);
+      runningRef.current = false;
+      setConvPhase('interrupted');
+      // Brief delay so the "Interrupted" state is visible, then settle to idle
+      await new Promise(r => setTimeout(r, 250));
+      setConvPhase('idle');
+      await new Promise(r => setTimeout(r, 50));
+    }
+
+    if (runningRef.current || (convPhase !== 'idle' && convPhase !== 'interrupted')) return;
+
+    setConvError(null);
+    setLiveTranscript(null);
+    setConvPhase('connecting');
+    await recorder.startRecording();
+    recordStartTimeRef.current = Date.now();
+    setConvPhase('recording');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convPhase, recorder, currentAudioUrl, voiceSettings.interruptEnabled]);
+
+  // Keep stable ref for wake phrase callback
+  useEffect(() => { handleSpeakStartRef.current = handleSpeakStart; }, [handleSpeakStart]);
+
+  // ── handleSpeakStop ───────────────────────────────────────────────────────
+
+  const handleSpeakStop = useCallback(async () => {
+    if (convPhase !== 'recording') return;
+    if (runningRef.current) return;
+
+    const elapsed = recordStartTimeRef.current ? Date.now() - recordStartTimeRef.current : 0;
+    if (elapsed < 400) {
+      setConvError('Hold Speak a moment — speak your message, then click Finish.');
+      return;
+    }
+
+    const blob = await recorder.stopRecording();
+    if (!blob) {
+      setConvPhase('error');
+      setConvError('No audio captured. Check mic permissions and try again.');
+      runningRef.current = false;
+      setTimeout(() => { setConvPhase('idle'); setConvError(null); }, 4000);
+      return;
+    }
+
+    await processBlob(blob, elapsed);
+  }, [convPhase, recorder, processBlob]);
+
+  // ── VAD auto-stop callback ────────────────────────────────────────────────
+  // Wire up onAutoStop to call handleSpeakStop
+  useEffect(() => {
+    onAutoStopRef.current = () => {
+      if (convPhase === 'recording' && !runningRef.current) {
+        handleSpeakStop();
+      }
+    };
+  }, [convPhase, handleSpeakStop]);
+
+  // ── handleStopPlayback (Skip) ─────────────────────────────────────────────
 
   const handleStopPlayback = useCallback(() => {
     audioRef.current?.pause();
@@ -413,6 +552,29 @@ export function AuraVoiceCore({
     openAIVoiceSessionService.clearHistory();
   }, []);
 
+  // ── Developer-only Make.com test event ────────────────────────────────────
+
+  const sendPhase3DTestEvent = useCallback(async () => {
+    // NO transcript, NO audio, NO API keys in this payload
+    const extraData = {
+      autoStopEnabled: voiceSettings.autoStopEnabled,
+      interruptEnabled: voiceSettings.interruptEnabled,
+      wakePhraseStatus: voiceSettings.wakePhrase ? 'enabled' : 'disabled',
+      responseStyle: voiceSettings.responseStyle ?? 'normal',
+    };
+    try {
+      const { makeConnectorService } = await import('../../services/connectors/MakeConnectorService');
+      await makeConnectorService.triggerScenarioIfConfigured(
+        'phase3d_voice_upgrade_test_completed',
+        'safe',
+        extraData,
+      );
+    } catch {
+      // Silently skip if Make.com not configured
+      console.info('[Phase3D] Test event skipped — Make.com not configured');
+    }
+  }, [voiceSettings]);
+
   // ── Legacy mock handlers ──────────────────────────────────────────────────
 
   const handleMockSpeakToggle = () => {
@@ -424,9 +586,75 @@ export function AuraVoiceCore({
   const handleApprove = () => { if (activeTrayApproval) runtime.resolveApproval(activeTrayApproval.id, 'approved'); };
   const handleReject  = () => { if (activeTrayApproval) runtime.resolveApproval(activeTrayApproval.id, 'rejected'); };
 
-  // ── Permission denied message ─────────────────────────────────────────────
-  const micDenied = recorder.state.micPermission === 'denied';
+  // ── Permission states ─────────────────────────────────────────────────────
+  const micDenied      = recorder.state.micPermission === 'denied';
   const micUnsupported = recorder.state.micPermission === 'unsupported';
+
+  // ── VAD phase (only relevant when using vadRecorder) ─────────────────────
+  const vadPhase = voiceSettings.autoStopEnabled ? vadRecorder.vadPhase : 'recording';
+
+  // ── Transcript You row label ──────────────────────────────────────────────
+  function youRowContent() {
+    if (convPhase === 'connecting') {
+      return <span className="text-zinc-500 italic">Starting microphone…</span>;
+    }
+    if (convPhase === 'recording') {
+      const durationSec = (recorder.state.durationMs / 1000).toFixed(1);
+      if (voiceSettings.autoStopEnabled) {
+        if (vadPhase === 'speech_detected') {
+          return (
+            <span className="flex items-center gap-1.5 text-rose-400 font-medium">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+              Speaking…
+              <span className="text-zinc-500 font-normal text-[10px]">{durationSec}s</span>
+            </span>
+          );
+        }
+        if (vadPhase === 'silence_detected') {
+          return (
+            <span className="flex items-center gap-1.5 text-amber-400 font-medium">
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+              Pause detected…
+              <span className="text-zinc-500 font-normal text-[10px]">{durationSec}s</span>
+            </span>
+          );
+        }
+        if (vadPhase === 'auto_stopping') {
+          return (
+            <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+              Processing…
+            </span>
+          );
+        }
+        // Default recording state with VAD enabled
+        return (
+          <span className="flex items-center gap-1.5 text-sky-400 font-medium">
+            <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse shrink-0" />
+            Listening… (auto)
+            <span className="text-zinc-500 font-normal text-[10px]">{durationSec}s</span>
+          </span>
+        );
+      }
+      // Manual stop mode
+      return (
+        <span className="flex items-center gap-1.5 text-rose-400 font-medium">
+          <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+          Recording…
+          <span className="text-zinc-500 font-normal text-[10px]">
+            {durationSec}s — click Finish when done
+          </span>
+        </span>
+      );
+    }
+    if (liveTranscript?.user) {
+      return <span className="text-zinc-200">{liveTranscript.user}</span>;
+    }
+    const hint = voiceSettings.autoStopEnabled
+      ? 'Press Speak, talk, then pause — AURA will auto-respond'
+      : 'Press Speak, talk, then click Finish';
+    return <span className="text-zinc-600 italic">{hint}</span>;
+  }
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -449,6 +677,19 @@ export function AuraVoiceCore({
               </div>
             </Fragment>
           ))}
+
+          {/* Wake phrase badge — amber, always visible when active */}
+          {voiceSettings.wakePhrase && wakePhrase.status === 'listening' && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/10 border border-amber-500/30 rounded-full">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+              <span className="text-[11px] text-amber-400 font-semibold">Wake phrase active</span>
+            </div>
+          )}
+          {voiceSettings.wakePhrase && wakePhrase.status === 'unavailable' && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-500/10 border border-rose-500/20 rounded-full">
+              <span className="text-[11px] text-rose-400 font-medium">Wake phrase unavailable</span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2 pointer-events-auto">
@@ -519,21 +760,7 @@ export function AuraVoiceCore({
             <div className="flex items-start gap-2.5 min-h-[1.4rem]">
               <span className="text-sky-400 text-[11px] font-semibold shrink-0 mt-0.5 w-8">You</span>
               <span className="text-[12px] leading-relaxed flex-1">
-                {convPhase === 'connecting' ? (
-                  <span className="text-zinc-500 italic">Starting microphone…</span>
-                ) : convPhase === 'recording' ? (
-                  <span className="flex items-center gap-1.5 text-rose-400 font-medium">
-                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
-                    Recording…
-                    <span className="text-zinc-500 font-normal text-[10px]">
-                      {(recorder.state.durationMs / 1000).toFixed(1)}s — click Done when finished
-                    </span>
-                  </span>
-                ) : liveTranscript?.user ? (
-                  <span className="text-zinc-200">{liveTranscript.user}</span>
-                ) : (
-                  <span className="text-zinc-600 italic">Press Speak, talk, then click Done</span>
-                )}
+                {youRowContent()}
               </span>
             </div>
 
@@ -551,12 +778,30 @@ export function AuraVoiceCore({
                   </span>
                 ) : convPhase === 'speaking' ? (
                   <span className="text-indigo-300">{liveTranscript?.aura ?? '…'}</span>
+                ) : convPhase === 'interrupted' ? (
+                  <span className="text-amber-400 italic">Interrupted</span>
                 ) : liveTranscript?.aura ? (
                   <span className="text-zinc-300">{liveTranscript.aura}</span>
                 ) : (
                   <span className="text-zinc-600 italic">Response will appear here</span>
                 )}
               </span>
+            </div>
+
+            {/* Status indicators */}
+            <div className="flex items-center gap-3 pt-0.5">
+              {voiceSettings.autoStopEnabled && (
+                <span className="text-[10px] text-zinc-600 flex items-center gap-1">
+                  <span className="w-1 h-1 rounded-full bg-zinc-600" />
+                  Auto-stop on pause
+                </span>
+              )}
+              {voiceSettings.wakePhrase && wakePhrase.status === 'listening' && (
+                <span className="text-[10px] text-amber-500/70 flex items-center gap-1">
+                  <span className="w-1 h-1 rounded-full bg-amber-500 animate-pulse" />
+                  Wake phrase active
+                </span>
+              )}
             </div>
 
             {/* Error / mic hint */}
@@ -572,7 +817,7 @@ export function AuraVoiceCore({
           </div>
         )}
 
-        {/* History toggle (compact, only when there are prior turns) */}
+        {/* History toggle */}
         {voiceSettings.enabled && turns.length > 1 && (
           <div className="w-full max-w-md">
             <button
@@ -614,11 +859,11 @@ export function AuraVoiceCore({
         <ApprovalTray isOpen={isTrayOpen} onClose={() => setIsTrayOpen(false)} approval={activeTrayApproval} status={activeTrayApproval.status} onApprove={handleApprove} onReject={handleReject} onDetails={onOpenTechnicalDrawer} />
       )}
 
-      {/* ZONE 5: Bottom strip — compact single-column layout, no overlapping rows */}
+      {/* ZONE 5: Bottom strip */}
       <div className="shrink-0 px-4 pt-1 pb-4">
         <div className="max-w-lg mx-auto flex flex-col gap-2">
 
-          {/* Row 1: mute + speak + voice toggle (all inline) */}
+          {/* Row 1: mute + speak + voice toggle */}
           <div className="flex items-center justify-center gap-2">
 
             {/* Mute */}
@@ -635,31 +880,53 @@ export function AuraVoiceCore({
               {runtime.isMuted ? <MicOff className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5 opacity-30" />}
             </button>
 
-            {/* Central speak button */}
+            {/* Central speak / interrupt button */}
             {voiceSettings.enabled ? (
               convPhase === 'speaking' ? (
-                <button onClick={handleStopPlayback}
-                  className="flex items-center gap-2 px-6 py-2.5 rounded-2xl font-semibold text-[14px] bg-amber-600 hover:bg-amber-500 text-white shadow-lg transition-all">
-                  <MicOff className="w-4 h-4" /> Skip
-                </button>
+                <div className="flex items-center gap-2">
+                  {/* Interrupt button — only shown if interruptEnabled */}
+                  {voiceSettings.interruptEnabled && (
+                    <button onClick={handleSpeakStart}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-2xl font-semibold text-[13px] bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/40 text-rose-300 shadow-lg transition-all">
+                      <Mic className="w-4 h-4" /> Interrupt
+                    </button>
+                  )}
+                  <button onClick={handleStopPlayback}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-2xl font-semibold text-[13px] bg-amber-600 hover:bg-amber-500 text-white shadow-lg transition-all">
+                    <MicOff className="w-4 h-4" /> Skip
+                  </button>
+                </div>
               ) : convPhase === 'recording' ? (
-                <button onClick={handleSpeakStop}
-                  className="flex items-center gap-2 px-6 py-2.5 rounded-2xl font-semibold text-[14px] bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/30 shadow-lg transition-all animate-pulse">
-                  <Mic className="w-4 h-4" /> Done
-                </button>
+                voiceSettings.autoStopEnabled ? (
+                  // Auto-stop enabled — show a dimmer "Speaking…" indicator; Finish is still available
+                  <button onClick={handleSpeakStop}
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-2xl font-semibold text-[14px] bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/30 shadow-lg transition-all">
+                    <Mic className="w-4 h-4" />
+                    {vadPhase === 'speech_detected' ? 'Speaking…' : vadPhase === 'silence_detected' ? 'Paused…' : 'Finish'}
+                  </button>
+                ) : (
+                  <button onClick={handleSpeakStop}
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-2xl font-semibold text-[14px] bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/30 shadow-lg transition-all animate-pulse">
+                    <Mic className="w-4 h-4" /> Finish
+                  </button>
+                )
               ) : (
                 <button
                   onClick={handleSpeakStart}
-                  disabled={convPhase !== 'idle' || micDenied || micUnsupported}
+                  disabled={
+                    (convPhase !== 'idle' && convPhase !== 'speaking') ||
+                    micDenied ||
+                    micUnsupported
+                  }
                   className={cn(
                     'flex items-center gap-2 px-6 py-2.5 rounded-2xl font-semibold text-[14px] shadow-lg transition-all',
-                    convPhase !== 'idle' || micDenied || micUnsupported
+                    ((convPhase !== 'idle' && convPhase !== 'speaking') || micDenied || micUnsupported)
                       ? 'bg-indigo-600/40 text-white/50 cursor-not-allowed'
                       : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/25',
                   )}
                 >
                   <Mic className="w-4 h-4" />
-                  {convPhase !== 'idle' ? convPhaseLabel(convPhase) : 'Speak'}
+                  {convPhase !== 'idle' && convPhase !== 'speaking' ? convPhaseLabel(convPhase) : 'Speak'}
                 </button>
               )
             ) : (
@@ -676,7 +943,7 @@ export function AuraVoiceCore({
               </button>
             )}
 
-            {/* Voice on/off — inline with speak button */}
+            {/* Voice on/off toggle */}
             <button
               onClick={() => setVoiceSettings(s => ({ ...s, enabled: !s.enabled }))}
               title="Toggle voice conversation"
@@ -712,6 +979,12 @@ export function AuraVoiceCore({
                   ? 'bg-amber-500/15 border-amber-500/30 text-amber-400'
                   : 'bg-zinc-900/60 border-zinc-700/50 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300')}>
               <Eye className="w-3 h-3" /> Safe
+            </button>
+            {/* Developer-only: Phase 3D test event — hidden in details drawer row */}
+            <button onClick={sendPhase3DTestEvent}
+              title="Developer: send Phase 3D test event to Make.com"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium bg-zinc-900/60 border-zinc-700/50 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-400 hover:border-zinc-600 transition-colors">
+              <Zap className="w-3 h-3" /> Test
             </button>
           </div>
         </div>
