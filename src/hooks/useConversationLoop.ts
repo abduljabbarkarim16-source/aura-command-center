@@ -30,11 +30,13 @@ import type { VoiceLatencyMetrics } from '../types/voice-latency';
 
 export type LoopPhase =
   | 'idle'
-  | 'listening'     // recorder active, VAD watching
-  | 'transcribing'  // sending audio to Whisper
-  | 'thinking'      // waiting for chat response
-  | 'speaking'      // TTS playing
-  | 'dormant'       // no speech for dormancyMs
+  | 'listening'       // recorder active, VAD watching
+  | 'transcribing'    // sending audio to Whisper
+  | 'acknowledging'   // instant ack shown — transcript captured, chat not started yet
+  | 'thinking'        // waiting for chat response
+  | 'preparing_voice' // chat done, TTS synthesis starting
+  | 'speaking'        // TTS playing
+  | 'dormant'         // no speech for dormancyMs
   | 'error';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -63,6 +65,14 @@ const DEFAULT_STOP_PHRASES = [
   'stop aura',
   'be quiet',
 ];
+
+const ACK_MESSAGES = ['Got it.', 'Checking.', "On it.", 'One moment.'];
+let ackIndex = 0;
+function nextAck(): string {
+  const msg = ACK_MESSAGES[ackIndex % ACK_MESSAGES.length];
+  ackIndex++;
+  return msg;
+}
 
 // ─── Barge-in analyser — lightweight mic poll while TTS plays ─────────────────
 
@@ -293,8 +303,15 @@ export function useConversationLoop(config: ConversationLoopConfig) {
       return;
     }
 
-    setLiveTranscript({ user: transcript, aura: '' });
+    // Instant acknowledgement — show ack immediately at 0ms, before any API call
+    const ackText = nextAck();
+    setLiveTranscript({ user: transcript, aura: ackText });
     setConsecutiveErrors(0);
+    updatePhase('acknowledging');
+
+    // Yield to let React paint the ack before the synchronous setup below
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
     updatePhase('thinking');
 
     // Start latency tracking
@@ -313,6 +330,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
       voiceLatencyService.markChatEnd(turnId);
 
       if (fastResult.success && fastResult.text) {
+        updatePhase('preparing_voice');
         voiceLatencyService.markTTSStart(turnId);
         const fastTts = await openAIVoiceSessionService.synthesizeSpeech(
           fastResult.text, settingsRef.current.ttsVoice,
@@ -382,6 +400,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     }
 
     setLiveTranscript({ user: transcript, aura: chatResult.text });
+    updatePhase('preparing_voice');
     voiceLatencyService.markTTSStart(turnId);
 
     // ── PATH 2: Sentence-first TTS ────────────────────────────────────────
@@ -391,13 +410,16 @@ export function useConversationLoop(config: ConversationLoopConfig) {
       if (sentences.length > 1) {
         // Synthesize first sentence immediately
         const first = sentences[0];
+        voiceLatencyService.markFirstSentenceTextReady(turnId);
         const firstTts = await openAIVoiceSessionService.synthesizeSpeech(
           first, settingsRef.current.ttsVoice,
         );
 
         if (firstTts.success && firstTts.audioBlobUrl) {
           voiceLatencyService.markTTSEnd(turnId);
+          voiceLatencyService.markFirstSentenceTtsReady(turnId);
           voiceLatencyService.markAudioStart(turnId);
+          voiceLatencyService.markFirstAudioStart(turnId);
           setCurrentAudioUrl(firstTts.audioBlobUrl);
           updatePhase('speaking');
           startBargeInAnalyser();
@@ -421,6 +443,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
               audioRef.current = remainAudio;
               setCurrentAudioUrl(remainTts.audioBlobUrl);
               remainAudio.play().catch(() => {});
+              voiceLatencyService.markFullAudioReady(turnId);
               remainAudio.onended = () => {
                 URL.revokeObjectURL(remainTts.audioBlobUrl!);
                 stopBargeInAnalyser();

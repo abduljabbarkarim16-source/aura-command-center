@@ -34,6 +34,16 @@ export interface VoiceLatencyMetrics {
   /** Total round-trip: first word spoken → full answer heard (ms) */
   totalRoundTripMs: number;
 
+  // Sentence-first TTS instrumentation (Phase 3F QA)
+  /** Time from transcript ready to first sentence text extracted (ms) */
+  firstSentenceTextReadyMs?: number;
+  /** Time from first sentence text to first sentence TTS audio ready (ms) */
+  firstSentenceTtsReadyMs?: number;
+  /** Time from transcript ready to first audio byte played (ms) — the key metric */
+  firstAudioStartMs?: number;
+  /** Time from transcript ready to all audio ready (ms) */
+  fullAudioReadyMs?: number;
+
   responseStyle: 'fast' | 'brief' | 'normal' | 'detailed';
   segmentedMode: boolean;
   sentenceFirstTTS: boolean;
@@ -58,6 +68,11 @@ export interface LatencyContext {
   ttsStartedAt?: number;
   ttsEndedAt?: number;
   audioStartedAt?: number;
+  // Sentence-first TTS granular markers (Phase 3F QA)
+  firstSentenceTextReadyAt?: number;
+  firstSentenceTtsReadyAt?: number;
+  firstAudioStartAt?: number;
+  fullAudioReadyAt?: number;
   segmentCount: number;
   responseStyle: 'fast' | 'brief' | 'normal' | 'detailed';
   segmentedMode: boolean;
