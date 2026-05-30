@@ -20,9 +20,11 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useSegmentedVoiceSession } from './useSegmentedVoiceSession';
 import { openAIVoiceSessionService } from '../services/voice/OpenAIVoiceSessionService';
 import { voiceTranscriptLogService } from '../services/voice/VoiceTranscriptLogService';
+import { voiceLatencyService } from '../services/voice/VoiceLatencyService';
 import { notifyVoiceError } from '../services/notifications/NotificationService';
 import type { VoiceConversationSettings, VoiceConversationTurn } from '../types/voice-session';
 import type { VADPhase } from './useVoiceActivityRecorder';
+import type { VoiceLatencyMetrics } from '../types/voice-latency';
 
 // ─── Loop phase ───────────────────────────────────────────────────────────────
 
@@ -47,6 +49,10 @@ export interface ConversationLoopConfig {
   stopPhrases: string[];
   onTurnComplete: (turn: VoiceConversationTurn) => void;
   onPhaseChange: (phase: LoopPhase) => void;
+  /** Fast mode: generate brief 1-sentence reply first, then full reply in background */
+  fastResponseMode?: boolean;
+  /** Sentence-first TTS: start playing after first sentence, queue remaining */
+  sentenceFirstTTS?: boolean;
 }
 
 const DEFAULT_STOP_PHRASES = [
@@ -80,12 +86,15 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     stopPhrases = DEFAULT_STOP_PHRASES,
     onTurnComplete,
     onPhaseChange,
+    fastResponseMode = false,
+    sentenceFirstTTS = true,
   } = config;
 
   const [loopPhase, setLoopPhase] = useState<LoopPhase>('idle');
   const [liveTranscript, setLiveTranscript] = useState<{ user: string; aura: string } | null>(null);
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
   const [consecutiveErrors, setConsecutiveErrors] = useState(0);
+  const [lastLatencyMetrics, setLastLatencyMetrics] = useState<VoiceLatencyMetrics | null>(null);
 
   // ── Refs ──────────────────────────────────────────────────────────────────
   const loopPhaseRef        = useRef<LoopPhase>('idle');
@@ -98,14 +107,18 @@ export function useConversationLoop(config: ConversationLoopConfig) {
   const onTurnRef           = useRef(onTurnComplete);
   const onPhaseRef          = useRef(onPhaseChange);
   const stopPhrasesRef      = useRef(stopPhrases);
-  const autoListenRef       = useRef(autoListen);
-  const recordStartRef      = useRef<number | null>(null);
+  const autoListenRef         = useRef(autoListen);
+  const fastResponseModeRef   = useRef(fastResponseMode);
+  const sentenceFirstTTSRef   = useRef(sentenceFirstTTS);
+  const recordStartRef        = useRef<number | null>(null);
 
-  useEffect(() => { settingsRef.current    = voiceSettings; }, [voiceSettings]);
-  useEffect(() => { onTurnRef.current      = onTurnComplete; }, [onTurnComplete]);
-  useEffect(() => { onPhaseRef.current     = onPhaseChange; }, [onPhaseChange]);
-  useEffect(() => { stopPhrasesRef.current = stopPhrases; }, [stopPhrases]);
-  useEffect(() => { autoListenRef.current  = autoListen; }, [autoListen]);
+  useEffect(() => { settingsRef.current       = voiceSettings; }, [voiceSettings]);
+  useEffect(() => { onTurnRef.current         = onTurnComplete; }, [onTurnComplete]);
+  useEffect(() => { onPhaseRef.current        = onPhaseChange; }, [onPhaseChange]);
+  useEffect(() => { stopPhrasesRef.current    = stopPhrases; }, [stopPhrases]);
+  useEffect(() => { autoListenRef.current     = autoListen; }, [autoListen]);
+  useEffect(() => { fastResponseModeRef.current  = fastResponseMode; }, [fastResponseMode]);
+  useEffect(() => { sentenceFirstTTSRef.current  = sentenceFirstTTS; }, [sentenceFirstTTS]);
 
   // ── Segmented voice session (replaces single-blob VAD recorder) ───────────
   const onAutoStopRef = useRef<(() => void) | undefined>(undefined);
@@ -219,12 +232,43 @@ export function useConversationLoop(config: ConversationLoopConfig) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearDormancy, dormancyMs, updatePhase]);
 
-  // ── Process assembled transcript from segmented session ───────────────────
+  // ── Play a TTS result and handle auto-listen after playback ──────────────
+
+  const playTTSAndContinue = useCallback((
+    audioBlobUrl: string,
+    onAfterPlay?: () => void,
+  ) => {
+    setCurrentAudioUrl(audioBlobUrl);
+    updatePhase('speaking');
+    startBargeInAnalyser();
+
+    const audio = new Audio(audioBlobUrl);
+    audioRef.current = audio;
+
+    const afterPlay = () => {
+      stopBargeInAnalyser();
+      URL.revokeObjectURL(audioBlobUrl);
+      setCurrentAudioUrl(null);
+      runningRef.current = false;
+      onAfterPlay?.();
+      if (loopPhaseRef.current === 'speaking') {
+        if (autoListenRef.current) startListeningCycle();
+        else updatePhase('idle');
+      }
+    };
+
+    audio.onended  = afterPlay;
+    audio.onerror  = () => { stopBargeInAnalyser(); runningRef.current = false; if (autoListenRef.current) startListeningCycle(); else updatePhase('idle'); };
+    audio.play().catch(() => { stopBargeInAnalyser(); runningRef.current = false; if (autoListenRef.current) startListeningCycle(); else updatePhase('idle'); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [updatePhase, startBargeInAnalyser, stopBargeInAnalyser, startListeningCycle]);
+
+  // ── Process assembled transcript — Phase 3F enhanced ─────────────────────
   //
-  // QA3: Instead of receiving a blob and transcribing it here, we receive the
-  // assembled transcript string from useSegmentedVoiceSession. The segmented
-  // session has already transcribed each rolling segment; this function just
-  // handles the chat → TTS → playback pipeline.
+  // Three response paths depending on settings:
+  //   1. Fast mode: 1-sentence brief reply → speak immediately → full reply background
+  //   2. Sentence-first TTS: full reply → split sentences → TTS first sentence → queue rest
+  //   3. Normal: full reply → TTS whole text → play
 
   const processTranscript = useCallback(async (transcript: string) => {
     const elapsed = recordStartRef.current ? Date.now() - recordStartRef.current : 0;
@@ -233,11 +277,8 @@ export function useConversationLoop(config: ConversationLoopConfig) {
 
     if (!transcript.trim()) {
       runningRef.current = false;
-      if (autoListenRef.current && loopPhaseRef.current !== 'idle') {
-        startListeningCycle();
-      } else {
-        updatePhase('idle');
-      }
+      if (autoListenRef.current && loopPhaseRef.current !== 'idle') startListeningCycle();
+      else updatePhase('idle');
       return;
     }
 
@@ -256,84 +297,208 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     setConsecutiveErrors(0);
     updatePhase('thinking');
 
-    const chatStart = Date.now();
+    // Start latency tracking
+    const style = settingsRef.current.responseStyle ?? 'normal';
+    const latencyStyle = fastResponseModeRef.current ? 'fast' : (style as 'brief' | 'normal' | 'detailed');
+    const turnId = voiceLatencyService.startTurn({
+      responseStyle: latencyStyle,
+      segmentedMode: true,
+      sentenceFirstTTS: sentenceFirstTTSRef.current,
+    });
+    voiceLatencyService.markChatStart(turnId);
+
+    // ── PATH 1: Fast mode — 1-sentence reply first ─────────────────────────
+    if (fastResponseModeRef.current) {
+      const fastResult = await openAIVoiceSessionService.createFastChatResponse(transcript);
+      voiceLatencyService.markChatEnd(turnId);
+
+      if (fastResult.success && fastResult.text) {
+        voiceLatencyService.markTTSStart(turnId);
+        const fastTts = await openAIVoiceSessionService.synthesizeSpeech(
+          fastResult.text, settingsRef.current.ttsVoice,
+        );
+        voiceLatencyService.markTTSEnd(turnId);
+
+        if (fastTts.success && fastTts.audioBlobUrl) {
+          voiceLatencyService.markAudioStart(turnId);
+          setLiveTranscript({ user: transcript, aura: fastResult.text + ' …' });
+
+          // Start playing fast reply, then get full response in background
+          const audio = new Audio(fastTts.audioBlobUrl);
+          audioRef.current = audio;
+          setCurrentAudioUrl(fastTts.audioBlobUrl);
+          updatePhase('speaking');
+          startBargeInAnalyser();
+          audio.play().catch(() => {});
+
+          // Full response runs concurrently
+          const fullResult = await openAIVoiceSessionService.createChatResponse(
+            transcript, style as 'brief' | 'normal' | 'detailed',
+          );
+          const fullText = fullResult.success ? fullResult.text ?? fastResult.text : fastResult.text;
+          setLiveTranscript({ user: transcript, aura: fullText });
+
+          audio.onended = () => {
+            URL.revokeObjectURL(fastTts.audioBlobUrl!);
+            stopBargeInAnalyser();
+            setCurrentAudioUrl(null);
+            runningRef.current = false;
+            const metrics = voiceLatencyService.finalize(turnId);
+            if (metrics) setLastLatencyMetrics(metrics);
+            if (autoListenRef.current) startListeningCycle();
+            else updatePhase('idle');
+          };
+          audio.onerror = () => {
+            stopBargeInAnalyser(); runningRef.current = false;
+            voiceLatencyService.abort(turnId);
+            if (autoListenRef.current) startListeningCycle(); else updatePhase('idle');
+          };
+
+          const turn: VoiceConversationTurn = {
+            id: `turn-${Date.now()}`, userText: transcript, auraText: fullText,
+            timestamp: new Date().toISOString(), chatLatencyMs: fastResult.latencyMs,
+          };
+          onTurnRef.current(turn);
+          voiceTranscriptLogService.logTurn({ userText: transcript, auraText: fullText, durationMs: elapsed });
+          return;
+        }
+      }
+      // Fast path failed — fall through to normal
+    }
+
+    // ── PATH 2 & 3: Full response ──────────────────────────────────────────
     const chatResult = await openAIVoiceSessionService.createChatResponse(
-      transcript,
-      settingsRef.current.responseStyle ?? 'normal',
+      transcript, style as 'brief' | 'normal' | 'detailed',
     );
-    const chatLatencyMs = Date.now() - chatStart;
+    voiceLatencyService.markChatEnd(turnId);
 
     if (!chatResult.success || !chatResult.text) {
       notifyVoiceError(chatResult.error ?? 'AI response failed.');
       runningRef.current = false;
+      voiceLatencyService.abort(turnId);
       if (autoListenRef.current) startListeningCycle();
       else updatePhase('idle');
       return;
     }
 
+    setLiveTranscript({ user: transcript, aura: chatResult.text });
+    voiceLatencyService.markTTSStart(turnId);
+
+    // ── PATH 2: Sentence-first TTS ────────────────────────────────────────
+    if (sentenceFirstTTSRef.current) {
+      const sentences = openAIVoiceSessionService.splitIntoSentences(chatResult.text);
+
+      if (sentences.length > 1) {
+        // Synthesize first sentence immediately
+        const first = sentences[0];
+        const firstTts = await openAIVoiceSessionService.synthesizeSpeech(
+          first, settingsRef.current.ttsVoice,
+        );
+
+        if (firstTts.success && firstTts.audioBlobUrl) {
+          voiceLatencyService.markTTSEnd(turnId);
+          voiceLatencyService.markAudioStart(turnId);
+          setCurrentAudioUrl(firstTts.audioBlobUrl);
+          updatePhase('speaking');
+          startBargeInAnalyser();
+
+          const remainingText = sentences.slice(1).join(' ');
+
+          // Synthesize remaining while first plays
+          const remainTtsPromise = remainingText
+            ? openAIVoiceSessionService.synthesizeSpeech(remainingText, settingsRef.current.ttsVoice)
+            : Promise.resolve<import('../types/voice-session').VoiceSpeechResult>({ success: false });
+
+          const firstAudio = new Audio(firstTts.audioBlobUrl);
+          audioRef.current = firstAudio;
+          firstAudio.play().catch(() => {});
+
+          firstAudio.onended = async () => {
+            URL.revokeObjectURL(firstTts.audioBlobUrl!);
+            const remainTts = await remainTtsPromise;
+            if (remainTts.success && remainTts.audioBlobUrl) {
+              const remainAudio = new Audio(remainTts.audioBlobUrl);
+              audioRef.current = remainAudio;
+              setCurrentAudioUrl(remainTts.audioBlobUrl);
+              remainAudio.play().catch(() => {});
+              remainAudio.onended = () => {
+                URL.revokeObjectURL(remainTts.audioBlobUrl!);
+                stopBargeInAnalyser();
+                setCurrentAudioUrl(null);
+                runningRef.current = false;
+                const metrics = voiceLatencyService.finalize(turnId);
+                if (metrics) setLastLatencyMetrics(metrics);
+                if (autoListenRef.current) startListeningCycle();
+                else updatePhase('idle');
+              };
+              remainAudio.onerror = () => {
+                stopBargeInAnalyser(); runningRef.current = false;
+                voiceLatencyService.abort(turnId);
+                if (autoListenRef.current) startListeningCycle(); else updatePhase('idle');
+              };
+            } else {
+              stopBargeInAnalyser();
+              setCurrentAudioUrl(null);
+              runningRef.current = false;
+              const metrics = voiceLatencyService.finalize(turnId);
+              if (metrics) setLastLatencyMetrics(metrics);
+              if (autoListenRef.current) startListeningCycle();
+              else updatePhase('idle');
+            }
+          };
+          firstAudio.onerror = () => {
+            stopBargeInAnalyser(); runningRef.current = false;
+            voiceLatencyService.abort(turnId);
+            if (autoListenRef.current) startListeningCycle(); else updatePhase('idle');
+          };
+
+          const turn: VoiceConversationTurn = {
+            id: `turn-${Date.now()}`, userText: transcript, auraText: chatResult.text,
+            timestamp: new Date().toISOString(), chatLatencyMs: chatResult.latencyMs,
+          };
+          onTurnRef.current(turn);
+          voiceTranscriptLogService.logTurn({ userText: transcript, auraText: chatResult.text, durationMs: elapsed });
+          return;
+        }
+      }
+    }
+
+    // ── PATH 3: Normal — full TTS then play ───────────────────────────────
     const ttsResult = await openAIVoiceSessionService.synthesizeSpeech(
-      chatResult.text,
-      settingsRef.current.ttsVoice,
+      chatResult.text, settingsRef.current.ttsVoice,
     );
+    voiceLatencyService.markTTSEnd(turnId);
 
     const turn: VoiceConversationTurn = {
       id:            `turn-${Date.now()}`,
       userText:      transcript,
       auraText:      chatResult.text,
       timestamp:     new Date().toISOString(),
-      chatLatencyMs: chatLatencyMs,
+      chatLatencyMs: chatResult.latencyMs,
       ttsLatencyMs:  ttsResult.latencyMs,
     };
     onTurnRef.current(turn);
-
     voiceTranscriptLogService.logTurn({
-      userText:      transcript,
-      auraText:      chatResult.text,
-      durationMs:    elapsed,
-      chatLatencyMs: chatLatencyMs,
-      ttsLatencyMs:  ttsResult.latencyMs,
+      userText: transcript, auraText: chatResult.text,
+      durationMs: elapsed, chatLatencyMs: chatResult.latencyMs, ttsLatencyMs: ttsResult.latencyMs,
     });
-
-    setLiveTranscript({ user: transcript, aura: chatResult.text });
 
     if (!ttsResult.success || !ttsResult.audioBlobUrl) {
       runningRef.current = false;
+      voiceLatencyService.abort(turnId);
       if (autoListenRef.current) startListeningCycle();
       else updatePhase('idle');
       return;
     }
 
-    setCurrentAudioUrl(ttsResult.audioBlobUrl);
-    updatePhase('speaking');
-
-    startBargeInAnalyser();
-
-    const audio = new Audio(ttsResult.audioBlobUrl);
-    audioRef.current = audio;
-    audio.onended = () => {
-      stopBargeInAnalyser();
-      URL.revokeObjectURL(ttsResult.audioBlobUrl!);
-      setCurrentAudioUrl(null);
-      runningRef.current = false;
-      if (loopPhaseRef.current === 'speaking') {
-        if (autoListenRef.current) startListeningCycle();
-        else updatePhase('idle');
-      }
-    };
-    audio.onerror = () => {
-      stopBargeInAnalyser();
-      runningRef.current = false;
-      if (autoListenRef.current) startListeningCycle();
-      else updatePhase('idle');
-    };
-    audio.play().catch(() => {
-      stopBargeInAnalyser();
-      runningRef.current = false;
-      if (autoListenRef.current) startListeningCycle();
-      else updatePhase('idle');
+    voiceLatencyService.markAudioStart(turnId);
+    playTTSAndContinue(ttsResult.audioBlobUrl, () => {
+      const metrics = voiceLatencyService.finalize(turnId);
+      if (metrics) setLastLatencyMetrics(metrics);
     });
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clearDormancy, updatePhase, startListeningCycle, startBargeInAnalyser, stopBargeInAnalyser]);
+  }, [clearDormancy, updatePhase, startListeningCycle, startBargeInAnalyser, stopBargeInAnalyser, playTTSAndContinue]);
 
   // ── VAD auto-stop callback ────────────────────────────────────────────────
 
@@ -427,6 +592,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     liveTranscript: liveTranscript ?? (segSession.liveTranscript ? { user: segSession.liveTranscript, aura: '' } : null),
     currentAudioUrl,
     consecutiveErrors,
+    lastLatencyMetrics,
     startConversation,
     stopConversation,
     resumeFromDormant,

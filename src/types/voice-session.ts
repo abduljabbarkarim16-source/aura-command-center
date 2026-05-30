@@ -115,6 +115,10 @@ export interface VoiceConversationSettings {
   maxThoughtMs?: number;      // max full thought duration, default 90000
   cleanupEnabled?: boolean;   // apply filler/vocab cleanup per segment, default true
   removeFillerWords?: boolean; // subset of cleanup: remove um/uh/etc, default true
+  // Phase 3F additions — fast response
+  fastResponseMode?: boolean;  // generate 1-sentence reply first, then full, default false
+  sentenceFirstTTS?: boolean;  // start TTS after first sentence, default true
+  fastAcknowledgementEnabled?: boolean; // show instant visual ack when speech captured, default true
 }
 
 export const DEFAULT_VOICE_SETTINGS: VoiceConversationSettings = {
@@ -133,6 +137,10 @@ export const DEFAULT_VOICE_SETTINGS: VoiceConversationSettings = {
   maxThoughtMs: 90_000,
   cleanupEnabled: true,
   removeFillerWords: true,
+  // Phase 3F
+  fastResponseMode: false,
+  sentenceFirstTTS: true,
+  fastAcknowledgementEnabled: true,
 };
 
 // ─── Session ──────────────────────────────────────────────────────────────────

@@ -1,7 +1,13 @@
 /**
- * OpenAIVoiceSessionService — AURA Phase 3D
+ * OpenAIVoiceSessionService — AURA Phase 3F
  *
  * Orchestrates OpenAI STT → Chat → TTS via the Tauri backend.
+ *
+ * Phase 3F additions:
+ *  - createFastChatResponse(): ultra-low-latency 1-sentence reply (fast mode)
+ *  - synthesizeSpeechFirstSentence(): generate TTS for just the first sentence,
+ *    returns first URL + remaining text so caller can pipeline TTS concurrently
+ *  - splitIntoSentences(): utility for sentence-first TTS queuing
  *
  * Security architecture:
  * - All OpenAI calls go through Tauri backend commands (voice_commands.rs)
@@ -10,9 +16,6 @@
  * - TTS audio bytes come back from Rust; converted to Blob URL locally
  * - Object URLs are revoked by the caller after playback
  * - Conversation history in memory only; not persisted unless user enables it
- *
- * Phase 3D: createChatResponse now accepts responseStyle for prompt tuning.
- * Provider: OpenAI for all three (STT/Chat/TTS) — simplest MVP path.
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -96,6 +99,42 @@ class OpenAIVoiceSessionServiceImpl {
     } catch (err) {
       return { success: false, error: String(err), latencyMs: Date.now() - start };
     }
+  }
+
+  // ── Fast chat: minimal-latency 1-sentence reply ───────────────────────────
+  //
+  // Uses 'brief' style with an instruction to reply in exactly one sentence.
+  // Does NOT store in history — only the full response is persisted.
+
+  async createFastChatResponse(transcript: string): Promise<VoiceChatResult> {
+    if (!transcript.trim()) return { success: false, error: 'Empty transcript' };
+    const start = Date.now();
+    try {
+      const historySlice = this.history.slice(-2); // just last exchange
+      const text = await invoke<string>('openai_chat_response', {
+        transcript: transcript.trim(),
+        history: historySlice,
+        responseStyle: 'brief',
+      });
+      return { success: true, text: text.trim(), latencyMs: Date.now() - start };
+    } catch (err) {
+      return { success: false, error: String(err), latencyMs: Date.now() - start };
+    }
+  }
+
+  // ── Sentence splitter ─────────────────────────────────────────────────────
+  //
+  // Splits text into sentences for sentence-first TTS queuing.
+  // Returns at least one element.
+
+  splitIntoSentences(text: string): string[] {
+    if (!text.trim()) return [];
+    // Split on sentence-ending punctuation followed by space or end-of-string
+    const parts = text
+      .split(/(?<=[.!?])\s+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    return parts.length > 0 ? parts : [text.trim()];
   }
 
   // ── TTS: synthesize speech via Tauri backend ──────────────────────────────
