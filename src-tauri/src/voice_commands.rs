@@ -199,26 +199,50 @@ pub async fn openai_transcribe_audio(
 
     let text = body["text"].as_str().unwrap_or("").trim().to_string();
 
-    // ── Layer 3: no_speech_prob + hallucination pattern filter ────────────────
-    // Check the highest no_speech_prob across all segments.
-    if let Some(segments) = body["segments"].as_array() {
-        let max_no_speech: f64 = segments
-            .iter()
-            .filter_map(|s| s["no_speech_prob"].as_f64())
-            .fold(0.0_f64, f64::max);
+    // ── Layer 3: hallucination filter + selective no_speech_prob check ────────
+    //
+    // IMPORTANT FIX (Phase 3E QA): For long speech (10–30s), a brief pause between
+    // sentences creates one segment with high no_speech_prob (e.g., 0.65).
+    // The old MAX approach discarded the ENTIRE transcript because of that one
+    // pause segment. This silently killed all 20–25s recordings.
+    //
+    // New approach:
+    //   1. Check hallucination patterns first — reject regardless of no_speech_prob.
+    //   2. If text is NON-EMPTY and not a hallucination, ALWAYS return it.
+    //      Whisper already transcribed real speech — trust it.
+    //   3. Only apply no_speech_prob check when text IS EMPTY (to distinguish
+    //      "silence" from "API returned empty for unknown reason").
+    //      In that case use AVERAGE probability, not MAX, to avoid single-pause rejection.
 
-        if max_no_speech > NO_SPEECH_PROB_THRESHOLD {
-            // Whisper itself thinks this is silence — discard silently.
-            return Ok(String::new());
-        }
-    }
-
+    // Step 1: hallucination filter applies regardless of text emptiness
     if is_likely_hallucination(&text) {
-        // Known hallucination pattern — discard silently.
         return Ok(String::new());
     }
 
-    Ok(text)
+    // Step 2: non-empty text from Whisper → return it (real speech was transcribed)
+    if !text.is_empty() {
+        return Ok(text);
+    }
+
+    // Step 3: empty text — use average no_speech_prob to confirm silence
+    // (avoids treating an API quirk as silence)
+    if let Some(segments) = body["segments"].as_array() {
+        let probs: Vec<f64> = segments
+            .iter()
+            .filter_map(|s| s["no_speech_prob"].as_f64())
+            .collect();
+        if !probs.is_empty() {
+            let avg = probs.iter().sum::<f64>() / probs.len() as f64;
+            if avg < 0.50 {
+                // Average no_speech_prob is low even though text is empty —
+                // possible API issue rather than true silence. Return empty
+                // so frontend shows a neutral message rather than "No speech."
+                return Ok(String::new());
+            }
+        }
+    }
+
+    Ok(String::new())
 }
 
 /// Generate a short AURA chat response for a transcript.

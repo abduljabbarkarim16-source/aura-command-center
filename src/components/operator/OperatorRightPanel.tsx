@@ -12,8 +12,9 @@ import React, { Fragment, useState, useEffect, useCallback } from 'react';
 import {
   Bell, ListTodo, MessageSquare, Map, Terminal, GitMerge,
   FolderOpen, ScrollText, ChevronLeft, ChevronRight, Trash2, Download,
-  X,
+  X, PanelRightOpen, PanelRightClose,
 } from 'lucide-react';
+import { TerminalPanel } from './TerminalPanel';
 import { cn } from '../../lib/utils';
 import { notificationService } from '../../services/notifications/NotificationService';
 import { voiceTranscriptLogService } from '../../services/voice/VoiceTranscriptLogService';
@@ -39,9 +40,8 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode; badge?: boolean }
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface OperatorRightPanelProps {
-  /** Width when open, in px */
   width?: number;
-  /** If controlled from parent */
+  /** Panel is open by default */
   defaultOpen?: boolean;
 }
 
@@ -166,39 +166,68 @@ export function OperatorRightPanel({ width = 300, defaultOpen = false }: Operato
   const activeTabDef = TABS.find(t => t.id === activeTab);
 
   return (
-    <div
-      className={cn(
-        'flex flex-col h-full bg-zinc-950/95 border-l border-zinc-800/70 transition-all duration-200',
-        isOpen ? 'min-w-0' : 'w-0 overflow-hidden',
-      )}
-      style={{ width: isOpen ? width : 0 }}
-    >
-      {/* ── Toggle rail (always visible) ── */}
-      <button
-        onClick={() => setIsOpen(p => !p)}
-        className="absolute top-1/2 -translate-y-1/2 -left-5 z-20 w-5 h-10 flex items-center justify-center bg-zinc-900 border border-zinc-800 rounded-l-lg text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
-        title={isOpen ? 'Collapse panel' : 'Expand panel'}
+    <div className="flex h-full">
+      {/* ── Collapsed icon rail — always visible ── */}
+      <div className={cn(
+        'flex flex-col items-center border-l border-zinc-800/70 bg-zinc-950/95 transition-all',
+        isOpen ? 'w-8 shrink-0' : 'w-10 shrink-0',
+      )}>
+        {/* Expand/collapse toggle */}
+        <button
+          onClick={() => setIsOpen(p => !p)}
+          className="w-full py-3 flex items-center justify-center text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/50 transition-colors border-b border-zinc-800/50"
+          title={isOpen ? 'Collapse panel' : 'Expand operator panel'}
+        >
+          {isOpen ? <PanelRightClose className="w-3.5 h-3.5" /> : <PanelRightOpen className="w-3.5 h-3.5" />}
+        </button>
+
+        {/* Tab icons in collapsed state */}
+        {!isOpen && TABS.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => { setActiveTab(tab.id); setIsOpen(true); }}
+            title={tab.label}
+            className={cn(
+              'relative w-full py-2.5 flex items-center justify-center text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800/40 transition-colors',
+              activeTab === tab.id && isOpen && 'text-zinc-200 bg-zinc-800/60',
+            )}
+          >
+            {tab.icon}
+            {tab.id === 'notifications' && unreadCount > 0 && (
+              <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-rose-500 text-[7px] text-white flex items-center justify-center">
+                {unreadCount > 9 ? '!' : unreadCount}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Open panel content ── */}
+      <div
+        className={cn(
+          'flex flex-col h-full bg-zinc-950/95 border-l border-zinc-800/40 transition-all duration-200',
+          isOpen ? 'min-w-0' : 'w-0 overflow-hidden',
+        )}
+        style={{ width: isOpen ? width : 0 }}
       >
-        {isOpen ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
-      </button>
 
       {isOpen && (
         <>
           {/* Tab bar */}
-          <div className="shrink-0 flex items-center gap-0.5 px-2 pt-2 pb-1 border-b border-zinc-800/70 overflow-x-auto scrollbar-none">
+          <div className="shrink-0 flex items-center gap-0.5 px-1.5 pt-2 pb-1 border-b border-zinc-800/70 overflow-x-auto scrollbar-none">
             {TABS.map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
-                  'relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium whitespace-nowrap transition-colors',
+                  'relative flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[10px] font-medium whitespace-nowrap transition-colors',
                   activeTab === tab.id
                     ? 'bg-zinc-800/80 text-zinc-200'
                     : 'text-zinc-600 hover:text-zinc-400 hover:bg-zinc-900',
                 )}
               >
                 {tab.icon}
-                {tab.label}
+                <span className="hidden sm:inline">{tab.label}</span>
                 {tab.badge && unreadCount > 0 && tab.id === 'notifications' && (
                   <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-rose-500 text-[8px] text-white flex items-center justify-center font-bold">
                     {unreadCount > 9 ? '9+' : unreadCount}
@@ -280,14 +309,15 @@ export function OperatorRightPanel({ width = 300, defaultOpen = false }: Operato
               </div>
             )}
 
+            {activeTab === 'terminal'  && <TerminalPanel />}
             {activeTab === 'planning'  && <PlaceholderTab label="Planning panel" />}
-            {activeTab === 'terminal'  && <PlaceholderTab label="Terminal output" />}
             {activeTab === 'diff'      && <PlaceholderTab label="Diff viewer" />}
             {activeTab === 'files'     && <PlaceholderTab label="File explorer" />}
             {activeTab === 'logs'      && <PlaceholderTab label="System logs" />}
           </div>
         </>
       )}
+      </div>
     </div>
   );
 }
