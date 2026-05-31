@@ -420,6 +420,184 @@ pub async fn openai_fast_chat_response(transcript: String) -> Result<String, Str
         .to_string())
 }
 
+/// Chat response with optional OpenAI function calling (tool use).
+///
+/// Accepts a list of tool definitions in OpenAI format.
+/// If the model returns a tool_call, this command returns a structured
+/// JSON response instead of plain text so the frontend can dispatch the tool.
+///
+/// Return format:
+///   { "type": "text",      "content": "..." }         — normal reply
+///   { "type": "tool_call", "name": "...", "args": {...}, "call_id": "..." } — tool dispatch
+///
+/// Frontend must execute the tool, then call openai_chat_tool_result to get
+/// the natural language follow-up.
+#[tauri::command]
+pub async fn openai_chat_with_tools(
+    transcript: String,
+    history: Vec<ChatMessage>,
+    system_prompt_override: Option<String>,
+    tools: Vec<serde_json::Value>,
+) -> Result<String, String> {
+    if transcript.trim().is_empty() {
+        return Err("Transcript is empty".to_string());
+    }
+
+    let key = get_openai_key()?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(90))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let system_prompt = system_prompt_override
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| AURA_SYSTEM_PROMPT_BASE.to_string());
+
+    let mut messages: Vec<serde_json::Value> = vec![
+        serde_json::json!({ "role": "system", "content": system_prompt }),
+    ];
+    for msg in history.iter().take(6) {
+        messages.push(serde_json::json!({ "role": msg.role, "content": msg.content }));
+    }
+    messages.push(serde_json::json!({ "role": "user", "content": transcript.trim() }));
+
+    let mut body = serde_json::json!({
+        "model": CHAT_MODEL,
+        "max_tokens": MAX_RESPONSE_TOKENS,
+        "messages": messages,
+    });
+
+    if !tools.is_empty() {
+        body["tools"] = serde_json::json!(tools);
+        body["tool_choice"] = serde_json::json!("auto");
+    }
+
+    let res = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .header("Authorization", format!("Bearer {key}"))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {e}"))?;
+
+    let status = res.status();
+    let data: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+
+    if !status.is_success() {
+        let msg = data["error"]["message"].as_str().unwrap_or("Chat failed");
+        return Err(format!("OpenAI chat error: {msg}"));
+    }
+
+    let choice = &data["choices"][0];
+    let finish_reason = choice["finish_reason"].as_str().unwrap_or("");
+
+    // Tool call response
+    if finish_reason == "tool_calls" {
+        if let Some(tool_calls) = choice["message"]["tool_calls"].as_array() {
+            if let Some(tc) = tool_calls.first() {
+                let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
+                let call_id = tc["id"].as_str().unwrap_or("").to_string();
+                let args_str = tc["function"]["arguments"].as_str().unwrap_or("{}");
+                let args: serde_json::Value = serde_json::from_str(args_str)
+                    .unwrap_or(serde_json::json!({}));
+                let result = serde_json::json!({
+                    "type": "tool_call",
+                    "name": name,
+                    "args": args,
+                    "call_id": call_id,
+                });
+                return Ok(result.to_string());
+            }
+        }
+    }
+
+    // Regular text response
+    let text = choice["message"]["content"]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    Ok(serde_json::json!({ "type": "text", "content": text }).to_string())
+}
+
+/// Send a tool result back to AURA and get the natural-language follow-up.
+/// Called after the frontend executes a tool dispatched by openai_chat_with_tools.
+#[tauri::command]
+pub async fn openai_chat_tool_result(
+    tool_name: String,
+    tool_call_id: String,
+    tool_result: String,
+    history: Vec<ChatMessage>,
+    system_prompt_override: Option<String>,
+    original_user_message: String,
+) -> Result<String, String> {
+    let key = get_openai_key()?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let system_prompt = system_prompt_override
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| AURA_SYSTEM_PROMPT_BASE.to_string());
+
+    let mut messages: Vec<serde_json::Value> = vec![
+        serde_json::json!({ "role": "system", "content": system_prompt }),
+    ];
+    for msg in history.iter().take(6) {
+        messages.push(serde_json::json!({ "role": msg.role, "content": msg.content }));
+    }
+    // Original user message
+    messages.push(serde_json::json!({ "role": "user", "content": original_user_message.trim() }));
+    // Assistant's tool call
+    messages.push(serde_json::json!({
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [{
+            "id": tool_call_id,
+            "type": "function",
+            "function": { "name": tool_name, "arguments": "{}" }
+        }]
+    }));
+    // Tool result
+    messages.push(serde_json::json!({
+        "role": "tool",
+        "tool_call_id": tool_call_id,
+        "content": tool_result,
+    }));
+
+    let body = serde_json::json!({
+        "model": CHAT_MODEL,
+        "max_tokens": MAX_RESPONSE_TOKENS,
+        "messages": messages,
+    });
+
+    let res = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .header("Authorization", format!("Bearer {key}"))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {e}"))?;
+
+    let status = res.status();
+    let data: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+
+    if !status.is_success() {
+        let msg = data["error"]["message"].as_str().unwrap_or("Follow-up failed");
+        return Err(format!("OpenAI error: {msg}"));
+    }
+
+    Ok(data["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_string())
+}
+
 /// Extract memorable facts from a conversation turn.
 ///
 /// Given a user message and AURA's response, asks gpt-4o-mini to extract

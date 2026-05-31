@@ -17,12 +17,25 @@ const MAX_USER_NAME_CHARS = 80;
 
 // Base identity — always present regardless of preset
 const BASE_IDENTITY =
-  'You are {AURA_NAME}, a voice assistant and AI operator. ' +
+  'You are {AURA_NAME}, a voice assistant and AI desktop operator. ' +
   'You speak directly to the user through audio. ' +
   'Never use markdown, bullet points, or formatted lists in voice responses. ' +
   'Never say "Certainly!", "Of course!", "Great question!", or similar filler openers. ' +
   'Do not claim to perform actions you have not actually performed. ' +
   'If you do not know something, say so briefly.';
+
+// Tool awareness — injected when tool dispatch is enabled
+const TOOL_AWARENESS =
+  'You have access to tools you can call directly:\n' +
+  '- terminal__gitStatus: get current git status\n' +
+  '- terminal__gitBranch: get current git branch\n' +
+  '- terminal__gitLog: show recent commits\n' +
+  '- terminal__npmLint: run TypeScript type-check\n' +
+  '- terminal__cargoTest: run Rust tests\n' +
+  '- cli__claudeCheck: check if Claude CLI is available\n' +
+  '- cli__codexCheck: check if Codex CLI is available\n' +
+  'When a question can be answered by running a tool, call it. ' +
+  'When you run a tool, say what you are doing in plain words before reading the result.';
 
 // Response style suffixes (used when responseStyle is set)
 export const STYLE_SUFFIX: Record<string, string> = {
@@ -86,6 +99,7 @@ class AuraPersonalityServiceImpl {
   buildSystemPrompt(opts: {
     responseStyle?: string;
     skipMemory?: boolean;
+    includeToolAwareness?: boolean;
   } = {}): string {
     const cfg = this.config;
     const auraName = cfg.auraName || 'AURA';
@@ -117,7 +131,12 @@ class AuraPersonalityServiceImpl {
       if (memCtx) parts.push(memCtx);
     }
 
-    // 5. Response style suffix
+    // 5. Tool awareness — tell model what tools it can use
+    if (opts.includeToolAwareness !== false) {
+      parts.push(TOOL_AWARENESS);
+    }
+
+    // 6. Response style suffix
     if (opts.responseStyle && STYLE_SUFFIX[opts.responseStyle]) {
       parts.push(STYLE_SUFFIX[opts.responseStyle]);
     }

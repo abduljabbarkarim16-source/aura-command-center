@@ -154,27 +154,42 @@ pub fn spawn_agent_session(
 
     // ── Build command ─────────────────────────────────────────────────────
     //
-    // Claude Code: try --print flag first (non-interactive mode)
-    // Codex: uses positional arg directly
-    // Both fall back to the plain positional arg if the flag variant fails.
+    // Windows note: npm-installed CLIs are .cmd scripts (codex.cmd, claude.cmd).
+    // Rust's Command::new() on Windows does NOT resolve .cmd files unless routed
+    // through cmd.exe. We always use "cmd /C <binary> <args>" on Windows so both
+    // claude and codex are found regardless of PATH ordering.
+    //
+    // Claude Code: --print flag for non-interactive output
+    // Codex: 'exec' subcommand + --no-interactive flag
 
     let lower = binary.to_lowercase();
-    // Claude Code: --print flag for non-interactive output (confirmed from --help)
-    // Codex: 'exec' subcommand for non-interactive output (confirmed from --help)
-    let args: Vec<String> = if lower == "claude" {
+    let cli_args: Vec<String> = if lower == "claude" {
         vec!["--print".to_string(), clean_prompt.clone()]
     } else if lower == "codex" {
-        vec!["exec".to_string(), clean_prompt.clone()]
+        // codex exec <prompt> runs the agent non-interactively
+        // --dangerously-skip-permissions lets it run without confirmation prompts
+        vec!["exec".to_string(), clean_prompt.clone(),
+             "--dangerously-skip-permissions".to_string()]
     } else {
         vec![clean_prompt.clone()]
     };
 
     let start = Instant::now();
-
     let timeout = Duration::from_secs(SESSION_TIMEOUT_SECS);
 
-    let mut child = match Command::new(&binary)
-        .args(&args)
+    // On Windows: route through cmd.exe /C so .cmd scripts resolve correctly
+    let mut cmd = if cfg!(target_os = "windows") {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg(&binary);
+        for a in &cli_args { c.arg(a); }
+        c
+    } else {
+        let mut c = Command::new(&binary);
+        c.args(&cli_args);
+        c
+    };
+
+    let mut child = match cmd
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -314,11 +329,20 @@ pub fn get_cli_help(binary: String) -> CliHelpSummary {
         };
     }
 
-    let output = Command::new(&binary)
-        .arg("--help")
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output();
+    // Use cmd /C on Windows so .cmd scripts resolve
+    let output = if cfg!(target_os = "windows") {
+        Command::new("cmd")
+            .args(["/C", &binary, "--help"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+    } else {
+        Command::new(&binary)
+            .arg("--help")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+    };
 
     let help_text = match output {
         Ok(o) => {

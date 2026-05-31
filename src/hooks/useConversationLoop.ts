@@ -23,6 +23,7 @@ import { voiceTranscriptLogService } from '../services/voice/VoiceTranscriptLogS
 import { voiceLatencyService } from '../services/voice/VoiceLatencyService';
 import { auraMemoryService } from '../services/memory/AuraMemoryService';
 import { auraPersonalityService } from '../services/personality/AuraPersonalityService';
+import { auraToolDispatchService } from '../services/tools/AuraToolDispatchService';
 import { notifyVoiceError } from '../services/notifications/NotificationService';
 import type { VoiceConversationSettings, VoiceConversationTurn } from '../types/voice-session';
 import type { VADPhase } from './useVoiceActivityRecorder';
@@ -57,6 +58,8 @@ export interface ConversationLoopConfig {
   fastResponseMode?: boolean;
   /** Sentence-first TTS: start playing after first sentence, queue remaining */
   sentenceFirstTTS?: boolean;
+  /** Tool dispatch: let AURA call approved tools autonomously via function calling */
+  toolDispatchEnabled?: boolean;
 }
 
 const DEFAULT_STOP_PHRASES = [
@@ -100,6 +103,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     onPhaseChange,
     fastResponseMode = false,
     sentenceFirstTTS = true,
+    toolDispatchEnabled = true,
   } = config;
 
   const [loopPhase, setLoopPhase] = useState<LoopPhase>('idle');
@@ -120,8 +124,9 @@ export function useConversationLoop(config: ConversationLoopConfig) {
   const onPhaseRef          = useRef(onPhaseChange);
   const stopPhrasesRef      = useRef(stopPhrases);
   const autoListenRef         = useRef(autoListen);
-  const fastResponseModeRef   = useRef(fastResponseMode);
-  const sentenceFirstTTSRef   = useRef(sentenceFirstTTS);
+  const fastResponseModeRef    = useRef(fastResponseMode);
+  const sentenceFirstTTSRef    = useRef(sentenceFirstTTS);
+  const toolDispatchEnabledRef = useRef(toolDispatchEnabled);
   const recordStartRef        = useRef<number | null>(null);
 
   useEffect(() => { settingsRef.current       = voiceSettings; }, [voiceSettings]);
@@ -129,8 +134,9 @@ export function useConversationLoop(config: ConversationLoopConfig) {
   useEffect(() => { onPhaseRef.current        = onPhaseChange; }, [onPhaseChange]);
   useEffect(() => { stopPhrasesRef.current    = stopPhrases; }, [stopPhrases]);
   useEffect(() => { autoListenRef.current     = autoListen; }, [autoListen]);
-  useEffect(() => { fastResponseModeRef.current  = fastResponseMode; }, [fastResponseMode]);
-  useEffect(() => { sentenceFirstTTSRef.current  = sentenceFirstTTS; }, [sentenceFirstTTS]);
+  useEffect(() => { fastResponseModeRef.current   = fastResponseMode; }, [fastResponseMode]);
+  useEffect(() => { sentenceFirstTTSRef.current   = sentenceFirstTTS; }, [sentenceFirstTTS]);
+  useEffect(() => { toolDispatchEnabledRef.current = toolDispatchEnabled; }, [toolDispatchEnabled]);
 
   // ── Segmented voice session (replaces single-blob VAD recorder) ───────────
   const onAutoStopRef = useRef<(() => void) | undefined>(undefined);
@@ -399,14 +405,61 @@ export function useConversationLoop(config: ConversationLoopConfig) {
       // Fast path failed — fall through to normal
     }
 
-    // ── PATH 2 & 3: Full response ──────────────────────────────────────────
-    const chatResult = await openAIVoiceSessionService.createChatResponse(
-      transcript, style as 'brief' | 'normal' | 'detailed', systemPrompt,
-    );
+    // ── PATH 2 & 3: Full response (with optional tool dispatch) ───────────
+    let chatText: string;
+    let toolUsed: string | undefined;
+
+    if (toolDispatchEnabledRef.current) {
+      // Use function calling — AURA can invoke tools autonomously
+      try {
+        const dispatchResult = await auraToolDispatchService.chatWithTools({
+          transcript,
+          history: openAIVoiceSessionService.getHistorySlice(6),
+          systemPrompt,
+          onToolDispatched: (toolId) => {
+            setLiveTranscript({ user: transcript, aura: `Running ${toolId}…` });
+          },
+        });
+        chatText = dispatchResult.text;
+        toolUsed = dispatchResult.toolUsed;
+        // Store in history manually since we bypassed the normal path
+        openAIVoiceSessionService.pushHistory(transcript, chatText);
+      } catch (err) {
+        // Fall back to regular chat on tool dispatch failure
+        const fallback = await openAIVoiceSessionService.createChatResponse(
+          transcript, style as 'brief' | 'normal' | 'detailed', systemPrompt,
+        );
+        chatText = fallback.text ?? '';
+        if (!fallback.success || !chatText) {
+          notifyVoiceError(fallback.error ?? 'AI response failed.');
+          runningRef.current = false;
+          voiceLatencyService.abort(turnId);
+          if (autoListenRef.current) startListeningCycle(); else updatePhase('idle');
+          return;
+        }
+      }
+    } else {
+      const chatResult = await openAIVoiceSessionService.createChatResponse(
+        transcript, style as 'brief' | 'normal' | 'detailed', systemPrompt,
+      );
+      if (!chatResult.success || !chatResult.text) {
+        notifyVoiceError(chatResult.error ?? 'AI response failed.');
+        runningRef.current = false;
+        voiceLatencyService.abort(turnId);
+        if (autoListenRef.current) startListeningCycle(); else updatePhase('idle');
+        return;
+      }
+      chatText = chatResult.text;
+    }
+
+    // Wrap into a synthetic result shape for the rest of the pipeline
+    const chatResult = { success: true, text: chatText, latencyMs: 0 };
+    void toolUsed; // captured in turn log below
+
     voiceLatencyService.markChatEnd(turnId);
 
     if (!chatResult.success || !chatResult.text) {
-      notifyVoiceError(chatResult.error ?? 'AI response failed.');
+      notifyVoiceError('AI response failed.');
       runningRef.current = false;
       voiceLatencyService.abort(turnId);
       if (autoListenRef.current) startListeningCycle();
