@@ -132,7 +132,7 @@ class RecipeLearningServiceImpl {
     });
   }
 
-  // Replay a recipe by creating a series of RuntimeTasks (or passing back to Dispatch)
+  // Replay a recipe by creating a series of RuntimeTasks
   async replayRecipe(id: string) {
     const recipe = this.recipes.get(id);
     if (!recipe) return;
@@ -149,13 +149,66 @@ class RecipeLearningServiceImpl {
       ttl: 3000
     });
 
-    // In a full implementation, this would dispatch the tools back into AuraToolDispatchService
-    // For now, we simulate success
-    setTimeout(() => {
+    const { auraToolDispatchService } = await import('../tools/AuraToolDispatchService');
+    const { toolRegistryService } = await import('../tools/ToolRegistryService');
+
+    let allSuccess = true;
+    for (const step of recipe.steps) {
+      const tool = toolRegistryService.getTool(step.toolUsed);
+      if (!tool) {
+        allSuccess = false;
+        break;
+      }
+
+      let taskType: any = 'system';
+      if (tool.category === 'terminal') taskType = 'terminal';
+      else if (tool.category === 'cli_agent') taskType = 'cli';
+      else if (tool.category === 'memory') taskType = 'memory';
+      else if (tool.category === 'capability') taskType = 'capability';
+
+      const task = runtimeTaskService.createTask({
+        title: `Recipe Step: ${tool.name}`,
+        type: taskType,
+        source: 'system',
+        risk: tool.risk,
+        toolId: tool.id
+      });
+
+      const approved = !tool.requiresApproval || recipe.approvalNeeded === false;
+
+      if (!approved) {
+        runtimeTaskService.failTask(task.id, 'Recipe execution blocked: missing approval.');
+        allSuccess = false;
+        break;
+      }
+
+      try {
+        const resultString = await auraToolDispatchService.executeToolCall({
+          type: 'tool_call',
+          toolId: tool.id,
+          callId: `recipe-step-${step.id}`,
+          args: step.parameters as Record<string, string>
+        }, { approved: true, taskId: task.id });
+        
+        const parsedResult = JSON.parse(resultString);
+        if (parsedResult.status !== 'completed' && parsedResult.status !== 'success') {
+          allSuccess = false;
+          break;
+        }
+      } catch (err) {
+        allSuccess = false;
+        break;
+      }
+    }
+
+    if (allSuccess) {
       recipe.successCount++;
-      this.saveRecipes();
-      this.notify();
-    }, 1000);
+    } else {
+      recipe.failureCount++;
+    }
+    
+    this.saveRecipes();
+    this.notify();
   }
 }
 

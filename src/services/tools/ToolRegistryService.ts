@@ -18,6 +18,9 @@ import { cliDiscoveryService } from '../agents/CliDiscoveryService';
 import { permissionModeService } from '../permissions/PermissionModeService';
 import { runtimeTaskService } from '../runtime/RuntimeTaskService';
 import type { RuntimeTaskType, RuntimeTask } from '../../types/runtime-task';
+import { ToolResultNormalizer } from './ToolResultNormalizer';
+import type { ToolResult } from '../../types/tool-result';
+import { incidentService } from '../testing/IncidentService';
 
 function uid(): string {
   return `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -257,34 +260,37 @@ class ToolRegistryServiceImpl {
 
   getExecutions(): ToolExecution[] { return [...this.executions]; }
 
-  /** Execute a tool by id. Throws if requiresApproval and no approval given. */
+  /** Execute a tool by id. Returns a normalized ToolResult. */
   async execute(
     toolId: string,
     inputs: Record<string, string> = {},
     options: { approved?: boolean; taskId?: string } = {},
-  ): Promise<ToolExecution> {
+  ): Promise<ToolResult> {
+    const startIso = new Date().toISOString();
+    const start = Date.now();
     const tool = this.getTool(toolId);
-    if (!tool) throw new Error(`Unknown tool: ${toolId}`);
+    
+    if (!tool) {
+      return ToolResultNormalizer.normalizeError(toolId, options.taskId, startIso, 0, new Error(`Unknown tool: ${toolId}`));
+    }
 
-    // Permission-mode gate. This is a frontend convenience layer; the real
-    // safety boundary is the Rust allowlist. `approved` means an explicit human
-    // (or operator self-test) action — the model's auto-selection passes false.
+    // Permission-mode gate
     const { decision, reason } = permissionModeService.decide(tool);
     if (decision === 'block') {
-      throw new Error(`Execution blocked: ${reason}`);
+      return ToolResultNormalizer.normalizeError(toolId, options.taskId, startIso, 0, new Error(`Execution blocked: ${reason}`));
     }
     if (decision === 'ask' && !options.approved) {
-      throw new Error(`Tool '${tool.name}' requires approval: ${reason}`);
+      return ToolResultNormalizer.normalizeError(toolId, options.taskId, startIso, 0, new Error(`Tool '${tool.name}' requires approval: ${reason}`));
     }
 
     // Validate inputs
     for (const [key, value] of Object.entries(inputs)) {
       if (!tool.allowedInputKeys.includes(key)) {
-        throw new Error(`Input key '${key}' is not allowed for tool '${toolId}'`);
+        return ToolResultNormalizer.normalizeError(toolId, options.taskId, startIso, 0, new Error(`Input key '${key}' is not allowed for tool '${toolId}'`));
       }
       for (const blocked of tool.blockedInputPatterns) {
         if (value.includes(blocked)) {
-          throw new Error(`Input contains blocked character: '${blocked}'`);
+          return ToolResultNormalizer.normalizeError(toolId, options.taskId, startIso, 0, new Error(`Input contains blocked character: '${blocked}'`));
         }
       }
     }
@@ -295,7 +301,7 @@ class ToolRegistryServiceImpl {
       toolId,
       status: 'running',
       inputs,
-      startedAt: new Date().toISOString(),
+      startedAt: startIso,
       approvedBy: options.approved ? 'user' : 'auto',
     };
 
@@ -305,7 +311,9 @@ class ToolRegistryServiceImpl {
     let runtimeTask: RuntimeTask;
     if (options.taskId) {
       const existing = runtimeTaskService.getTask(options.taskId);
-      if (!existing) throw new Error(`Task ID not found: ${options.taskId}`);
+      if (!existing) {
+        return ToolResultNormalizer.normalizeError(toolId, options.taskId, startIso, 0, new Error(`Task ID not found: ${options.taskId}`));
+      }
       runtimeTask = existing;
     } else {
       let taskType: RuntimeTaskType = 'system';
@@ -332,50 +340,77 @@ class ToolRegistryServiceImpl {
 
     try {
       const result = await this.runTool(tool, inputs);
-      const end = new Date().toISOString();
+      const durationMs = Date.now() - start;
       
       const successMessage = `Completed with exit code ${result.exitCode}. Output: ${result.output.slice(0, 100)}...`;
       runtimeTaskService.appendLog(runtimeTask.id, successMessage, result.exitCode === 0 ? 'success' : 'warn');
 
       const done: Partial<ToolExecution> = {
-        status: 'completed',
+        status: result.exitCode === 0 ? 'completed' : 'error',
         output: result.output,
         exitCode: result.exitCode,
-        endedAt: end,
-        durationMs: result.durationMs,
+        endedAt: new Date().toISOString(),
+        durationMs,
       };
-      if (result.exitCode !== 0) done.status = 'error';
       this.updateExecution(execId, done);
       
       if (result.exitCode === 0) {
-        // Tag tasks that update memory
         const memoryWriteTools = ['memory.rememberFact', 'memory.setUserName', 'memory.updatePreference', 'memory.deleteMemoryItem'];
         if (memoryWriteTools.includes(tool.id)) {
           const t = runtimeTaskService.getTask(runtimeTask.id);
-          if (t) {
-            t.updatedMemory = true;
-          }
+          if (t) t.updatedMemory = true;
         }
-        
         runtimeTaskService.completeTask(runtimeTask.id, { output: result.output, exitCode: result.exitCode }, `Exit code: ${result.exitCode}`);
       } else {
         runtimeTaskService.failTask(runtimeTask.id, `Exit code ${result.exitCode}: ${result.output.slice(0, 200)}`);
+        
+        // Incident handling for explicit errors
+        if (result.output.includes('not found') || result.output.includes('ERR_')) {
+          incidentService.createIncident({
+            type: 'tool-dispatch-failed',
+            severity: 'warn',
+            message: `Tool ${toolId} failed: ${result.output.slice(0, 100)}`,
+            context: { toolId, exitCode: result.exitCode }
+          });
+        }
       }
       
-      return { ...execution, ...done };
+      return ToolResultNormalizer.normalizeSuccess(
+        toolId, 
+        runtimeTask.id, 
+        startIso, 
+        durationMs, 
+        result.exitCode === 0 ? 'Tool completed successfully.' : 'Tool finished with non-zero exit code.', 
+        { stdout: result.output, exitCode: result.exitCode }
+      );
     } catch (err) {
       const errMsg = String(err);
+      const durationMs = Date.now() - start;
       runtimeTaskService.appendLog(runtimeTask.id, `Error: ${errMsg}`, 'error');
       
       this.updateExecution(execId, {
         status: 'error',
         errorSummary: errMsg,
         endedAt: new Date().toISOString(),
+        durationMs
       });
       
       runtimeTaskService.failTask(runtimeTask.id, errMsg);
       
-      return { ...execution, status: 'error', errorSummary: errMsg };
+      incidentService.createIncident({
+        type: 'tool-dispatch-failed',
+        severity: 'error',
+        message: `Tool ${toolId} crashed: ${errMsg}`,
+        context: { toolId, error: errMsg }
+      });
+      
+      return ToolResultNormalizer.normalizeError(
+        toolId, 
+        runtimeTask.id, 
+        startIso, 
+        durationMs, 
+        err
+      );
     }
   }
 

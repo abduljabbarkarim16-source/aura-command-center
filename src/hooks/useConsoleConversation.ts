@@ -75,7 +75,8 @@ export function useConsoleConversation() {
       setBusyLabel(`Running ${intent.toolId}…`);
       try {
         const exec = await toolRegistryService.execute(intent.toolId, intent.inputs, { approved: true });
-        const auraText = (exec.output ?? '').trim() || '(done)';
+        const textOutput = [exec.stdout, exec.stderr].filter(Boolean).join('\n').trim();
+        const auraText = textOutput || '(done)';
         push({ role: 'aura', text: auraText, toolUsed: intent.toolId });
         historyRef.current = [
           ...historyRef.current,

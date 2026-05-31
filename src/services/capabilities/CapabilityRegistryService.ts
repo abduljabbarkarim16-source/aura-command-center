@@ -388,9 +388,9 @@ class CapabilityRegistryServiceImpl {
     switch (c.id) {
       case 'terminal.gitStatus': {
         const r = await toolRegistryService.execute('terminal.gitStatus', {}, { approved: true });
-        const ok = r.status === 'completed';
+        const ok = r.status === 'success';
         return { ok, status: ok ? 'available' : 'blocked',
-          detail: ok ? `git status ran (exit ${r.exitCode ?? 0}).` : (r.errorSummary ?? 'git status failed.') };
+          detail: ok ? `git status ran (exit ${r.exitCode ?? 0}).` : (r.error ?? 'git status failed.') };
       }
       case 'terminal.npmLint':
       case 'terminal.npmBuild':

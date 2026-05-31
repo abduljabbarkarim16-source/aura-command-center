@@ -68,7 +68,7 @@ class AuraSelfTestServiceImpl {
         fix: 'Ensure the workspace is a git repository and git is on PATH.',
         run: async () => {
           const r = await toolRegistryService.execute('terminal.gitStatus', {}, { approved: true });
-          return { ok: r.status === 'completed', detail: r.status === 'completed' ? `Ran (exit ${r.exitCode ?? 0}).` : (r.errorSummary ?? 'failed') };
+          return { ok: r.status === 'success', detail: r.status === 'success' ? `Ran (exit ${r.exitCode ?? 0}).` : (r.error ?? 'failed') };
         },
       },
       {

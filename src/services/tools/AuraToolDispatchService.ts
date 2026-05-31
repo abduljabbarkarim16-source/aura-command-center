@@ -19,6 +19,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { toolRegistryService, TOOL_CATALOG } from './ToolRegistryService';
 import type { ToolDefinition } from '../../types/tools';
 import { runtimeTaskService } from '../runtime/RuntimeTaskService';
+import { incidentService } from '../testing/IncidentService';
+import { permissionModeService } from '../permissions/PermissionModeService';
 import type { RuntimeTaskType } from '../../types/runtime-task';
 
 // ─── OpenAI function schema builder ───────────────────────────────────────────
@@ -107,12 +109,9 @@ class AuraToolDispatchServiceImpl {
   ): Promise<string> {
     try {
       const result = await toolRegistryService.execute(call.toolId, call.args, options);
-      if (result.status === 'error') {
-        return `Tool error: ${result.errorSummary ?? 'unknown error'}`;
-      }
-      return result.output ?? '(no output)';
+      return JSON.stringify(result, null, 2);
     } catch (err) {
-      return `Tool failed: ${String(err)}`;
+      return JSON.stringify({ status: 'failed', error: String(err) });
     }
   }
 
@@ -151,6 +150,12 @@ class AuraToolDispatchServiceImpl {
     const tool = toolRegistryService.getTool(toolId);
 
     if (!tool) {
+      incidentService.createIncident({
+        type: 'hallucinated-success',
+        severity: 'warn',
+        message: `Model tried to use unknown tool: ${toolId}`,
+        context: { callId, args }
+      });
       // Unknown tool — fall back to normal text response
       return { text: 'I tried to use a tool but it wasn\'t available. Let me answer directly.' };
     }
@@ -170,9 +175,16 @@ class AuraToolDispatchServiceImpl {
       toolId: toolId
     });
 
-    // Approval gate for medium-risk tools
-    let approved = !tool.requiresApproval;
-    if (tool.requiresApproval && params.onApprovalNeeded) {
+    // Permission mode gate
+    const { decision, reason } = permissionModeService.decide(tool);
+
+    if (decision === 'block') {
+      runtimeTaskService.failTask(task.id, `Blocked by permission mode: ${reason}`);
+      return { text: `I cannot run ${tool.name} because it is blocked by the current permission mode.` };
+    }
+
+    let approved = decision === 'auto';
+    if (decision === 'ask' && params.onApprovalNeeded) {
       runtimeTaskService.blockTask(task.id, 'Waiting for human approval');
       approved = await params.onApprovalNeeded(toolId);
     }
@@ -185,9 +197,8 @@ class AuraToolDispatchServiceImpl {
     params.onToolDispatched?.(toolId);
 
     // Execute the tool. A human only "approved" it if the tool actually required
-    // approval and onApprovalNeeded returned true; otherwise the permission mode
-    // decides (auto for low-risk in Safe Auto, blocked in Locked, etc.).
-    const humanApproved = tool.requiresApproval && approved;
+    // approval and onApprovalNeeded returned true.
+    const humanApproved = decision === 'ask' && approved;
     const toolResult = await this.executeToolCall(parsed, { approved: humanApproved, taskId: task.id });
 
     // Follow-up call — model converts tool result to natural speech
