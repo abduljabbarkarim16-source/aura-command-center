@@ -157,6 +157,9 @@ fn truncate_utf8(text: &str, max_bytes: usize) -> &str {
 pub async fn openai_transcribe_audio(
     audio_bytes: Vec<u8>,
     content_type: String,
+    // Optional vocabulary/spelling hint (project terms + the user's name).
+    // Whisper uses this as context to bias toward correct spellings.
+    prompt: Option<String>,
 ) -> Result<String, String> {
     // ── Layer 1: Pre-flight size gate ─────────────────────────────────────────
     if audio_bytes.is_empty() {
@@ -204,12 +207,21 @@ pub async fn openai_transcribe_audio(
     // verbose_json gives us no_speech_prob per segment.
     // temperature=0 is deterministic — much less likely to hallucinate.
     // language=en avoids cross-language drift on noisy input.
-    let form = reqwest::multipart::Form::new()
+    let mut form = reqwest::multipart::Form::new()
         .part("file", file_part)
         .text("model", STT_MODEL)
         .text("response_format", "verbose_json")
         .text("temperature", "0")
         .text("language", "en");
+
+    // Optional vocabulary/spelling hint. Capped well under Whisper's ~224-token
+    // prompt budget so it biases spelling without crowding out the audio.
+    if let Some(p) = prompt {
+        let p = p.trim();
+        if !p.is_empty() {
+            form = form.text("prompt", truncate_utf8(p, 600).to_string());
+        }
+    }
 
     let res = client
         .post("https://api.openai.com/v1/audio/transcriptions")

@@ -39,6 +39,18 @@ interface ChatHistoryMessage {
 
 const MAX_HISTORY_TURNS = 5;
 
+// ─── Transcription vocabulary hint ────────────────────────────────────────────
+// Passed to Whisper as `prompt` so domain terms and the operator's name transcribe
+// correctly (Whisper biases toward spellings it has just "seen" in the prompt).
+
+const TRANSCRIPTION_VOCAB =
+  'AURA, Karim, Claude, Codex, Antigravity, Tauri, Make.com, OpenAI, Whisper, Gemini, VAD, RuntimeTask, WebView2, ai-build-memory, agent-command-center';
+
+function buildTranscriptionPrompt(name?: string): string {
+  const base = `AURA operator console. Terms: ${TRANSCRIPTION_VOCAB}.`;
+  return name && name.trim() ? `${base} The user's name is ${name.trim()}.` : base;
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 class OpenAIVoiceSessionServiceImpl {
@@ -56,7 +68,7 @@ class OpenAIVoiceSessionServiceImpl {
 
   // ── STT: transcribe audio via Tauri backend ───────────────────────────────
 
-  async transcribeAudio(audioBlob: Blob): Promise<VoiceTranscriptionResult> {
+  async transcribeAudio(audioBlob: Blob, promptOverride?: string): Promise<VoiceTranscriptionResult> {
     const start = Date.now();
     try {
       // Convert blob to byte array for Tauri transfer
@@ -64,9 +76,22 @@ class OpenAIVoiceSessionServiceImpl {
       const audioBytes = Array.from(new Uint8Array(buffer));
       const contentType = audioBlob.type || 'audio/webm';
 
+      // Build the vocabulary/spelling hint (project terms + the user's saved name)
+      // unless the caller supplied one. Lazy import avoids any module cycle.
+      let prompt = promptOverride;
+      if (prompt === undefined) {
+        try {
+          const { userProfileMemoryService } = await import('../memory/UserProfileMemoryService');
+          prompt = buildTranscriptionPrompt(userProfileMemoryService.getDisplayName());
+        } catch {
+          prompt = buildTranscriptionPrompt();
+        }
+      }
+
       const text = await invoke<string>('openai_transcribe_audio', {
         audioBytes,
         contentType,
+        prompt,
       });
 
       return { success: true, text: text.trim(), latencyMs: Date.now() - start };

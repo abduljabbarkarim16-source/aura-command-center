@@ -11,13 +11,38 @@
  *   0.3.2  - Phase 3C (voice conversation MVP - STT/Chat/TTS via Tauri backend)
  */
 
-export const APP_VERSION = '0.5.0';
-export const APP_PHASE   = 'Phase 3J';
-export const APP_PHASE_LABEL = 'Operator UI/UX Refinement';
+export const APP_VERSION = '0.5.1';
+export const APP_PHASE   = 'Phase 3J QA';
+export const APP_PHASE_LABEL = 'Visual + Voice Fix';
 export const BUILD_DATE  = '2026-05-31';
+
+/**
+ * Build provenance - injected at build time by vite.config.ts `define`.
+ * This is the fix for the 0.5.0-vs-0.5.0 installer ambiguity that hid the
+ * Phase 3J UI: every build now carries its exact commit SHA and build time,
+ * shown in Settings -> Details, so the user can confirm which build is live.
+ */
+declare const __APP_BUILD_SHA__: string;
+declare const __APP_BUILD_BRANCH__: string;
+declare const __APP_BUILD_TIME__: string;
+
+export const BUILD_SHA    = typeof __APP_BUILD_SHA__    !== 'undefined' ? __APP_BUILD_SHA__    : 'dev';
+export const BUILD_BRANCH = typeof __APP_BUILD_BRANCH__ !== 'undefined' ? __APP_BUILD_BRANCH__ : 'unknown';
+export const BUILD_TIME   = typeof __APP_BUILD_TIME__   !== 'undefined' ? __APP_BUILD_TIME__   : '';
 
 /** Full display string shown in Settings header and About chip */
 export const VERSION_DISPLAY = `v${APP_VERSION} / ${APP_PHASE}`;
+
+/**
+ * Compact, copyable build marker for the Details panel.
+ * e.g. "v0.5.1 · Phase 3J QA · a1b2c3d · 2026-05-31 14:22"
+ */
+export const BUILD_MARKER = [
+  `v${APP_VERSION}`,
+  APP_PHASE,
+  BUILD_SHA,
+  BUILD_TIME ? BUILD_TIME.slice(0, 16).replace('T', ' ') : BUILD_DATE,
+].join(' · ');
 
 /** Changelog - newest entry first */
 export interface ChangelogEntry {
@@ -29,6 +54,19 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version:  '0.5.1',
+    phase:    'Phase 3J QA',
+    date:     '2026-05-31',
+    summary:  'Visual + Voice Fix',
+    highlights: [
+      'Unique 0.5.1 installer + in-app build marker (version, phase, commit, build time) so the running build is identifiable',
+      'Living Visual Canvas is now a premium, state-reactive work surface (idle / listening / thinking / tool / memory / done)',
+      'Voice name + spelling capture: letter-by-letter and NATO spelling normalized; confirms before saving an uncertain name',
+      'Transcription biased with project vocabulary (AURA, Karim, Claude, Codex, Tauri...) and a local correction dictionary',
+      'Voice diagnostics in Details: raw vs cleaned text, detected intent, spelling mode, saved value, and timings',
+    ],
+  },
   {
     version:  '0.5.0',
     phase:    'Phase 3J',

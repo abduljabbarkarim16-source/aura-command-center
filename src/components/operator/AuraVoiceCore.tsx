@@ -28,6 +28,7 @@ import { auraPersonalityService } from '../../services/personality/AuraPersonali
 import { cn } from '../../lib/utils';
 import { AuraVoiceVisualizer } from './AuraVoiceVisualizer';
 import type { VisualizerState } from './AuraVoiceVisualizer';
+import { AmbientCanvas, type AmbientState } from './AmbientCanvas';
 import { AdminVoiceIndicator } from './AdminVoiceIndicator';
 import type { AdminVoiceState } from './AdminVoiceIndicator';
 import { ApprovalTray } from './ApprovalTray';
@@ -525,6 +526,15 @@ export function AuraVoiceCore({
     ? effectivePhaseForVisualizer
     : RUNTIME_TO_VISUALIZER[runtime.state] ?? 'idle';
 
+  // Map the visualizer state onto the living ambient background behind the orb.
+  const ambientState: AmbientState =
+    effectiveVis === 'executing' || effectiveVis === 'waiting_for_approval' ? 'working'
+      : effectiveVis === 'listening' ? 'listening'
+        : effectiveVis === 'thinking' ? 'thinking'
+          : effectiveVis === 'speaking' ? 'speaking'
+            : effectiveVis === 'error' ? 'error'
+              : 'idle';
+
   const adminState: AdminVoiceState = (() => {
     if (runtime.isMuted) return 'muted';
     const isRecording = conversationModeEnabled ? loop.loopPhase === 'listening' : oneShotPhase === 'recording';
@@ -587,7 +597,9 @@ export function AuraVoiceCore({
 
   // --- Render ---------------------------------------------------------------
   return (
-    <div className="relative flex flex-col h-full min-h-0 w-full bg-gradient-to-b from-zinc-950 via-zinc-950 to-indigo-950/10 overflow-hidden">
+    <div className="relative flex flex-col h-full min-h-0 w-full bg-zinc-950 overflow-hidden">
+      {/* Living visual work surface — premium when idle, reactive to voice/task state */}
+      <AmbientCanvas state={ambientState} />
       <NotificationToast position="top-right" maxVisible={3} />
 
       {/* -- Status strip: orb-centric, minimal top -- */}
@@ -623,7 +635,7 @@ export function AuraVoiceCore({
       {/* Mission state lives in Console and Memory. */}
 
       {/* -- Orb + transcript (scrollable) -- */}
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col items-center px-4 pt-16 pb-0 gap-3">
+      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto flex flex-col items-center px-4 pt-16 pb-0 gap-3">
         <AuraVoiceVisualizer state={effectiveVis} source={conversationModeEnabled && loop.loopPhase === 'listening' ? 'admin' : 'aura'} size="xl" showLabel />
         {isVoiceActive && <AdminVoiceIndicator state={adminState} />}
 

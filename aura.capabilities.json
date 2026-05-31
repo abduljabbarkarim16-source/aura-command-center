@@ -1,7 +1,7 @@
 {
-  "version": "0.5.0",
-  "phase": "3J",
-  "phaseName": "Operator UI/UX Refinement",
+  "version": "0.5.1",
+  "phase": "3J QA",
+  "phaseName": "Visual + Voice Fix",
   "updated": "2026-05-31",
   "agent": "Claude (Anthropic / claude-opus-4-8)",
   "note": "Design-time manifest. Runtime status is refined by CapabilityRegistryService.test(); items marked 'testable' are confirmed live, not asserted here.",

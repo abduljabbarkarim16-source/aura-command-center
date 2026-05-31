@@ -91,3 +91,31 @@
 .orb-ring {
   animation: orb-ring 1.5s ease-out infinite;
 }
+
+/* ─── Living ambient surface (Voice Core / Console background) ──────────────── */
+@keyframes ambient-drift-a {
+  0%   { transform: translate3d(-6%, -4%, 0) scale(1); }
+  50%  { transform: translate3d(6%, 3%, 0)  scale(1.14); }
+  100% { transform: translate3d(-6%, -4%, 0) scale(1); }
+}
+@keyframes ambient-drift-b {
+  0%   { transform: translate3d(5%, 6%, 0)  scale(1.12); }
+  50%  { transform: translate3d(-5%, -6%, 0) scale(1); }
+  100% { transform: translate3d(5%, 6%, 0)  scale(1.12); }
+}
+@keyframes ambient-breathe {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
+}
+@keyframes ambient-grid-pan {
+  from { background-position: 0 0; }
+  to   { background-position: 28px 28px; }
+}
+.ambient-blob-a { animation: ambient-drift-a 19s ease-in-out infinite; }
+.ambient-blob-b { animation: ambient-drift-b 26s ease-in-out infinite; }
+.ambient-breathe { animation: ambient-breathe 6s ease-in-out infinite; }
+.ambient-grid   { animation: ambient-grid-pan 38s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient-blob-a, .ambient-blob-b, .ambient-breathe, .ambient-grid { animation: none; }
+}

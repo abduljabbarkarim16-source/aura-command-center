@@ -17,6 +17,7 @@ import {
   ScrollText,
   Settings2,
   ShieldCheck,
+  Tag,
   Terminal,
   Trash2,
   Wrench,
@@ -24,6 +25,8 @@ import {
   XCircle,
   Loader2,
 } from 'lucide-react';
+import { APP_VERSION, APP_PHASE, APP_PHASE_LABEL, BUILD_SHA, BUILD_BRANCH, BUILD_TIME, BUILD_DATE } from '../../lib/appVersion';
+import { voiceDiagnosticsService, type VoiceDiagnosticEntry } from '../../services/voice/VoiceDiagnosticsService';
 import { TerminalPanel } from './TerminalPanel';
 import { RuntimeTaskHistoryPanel } from './RuntimeTaskHistoryPanel';
 import { CapabilitiesPanel } from './CapabilitiesPanel';
@@ -388,6 +391,65 @@ function NotificationsPanel({
   );
 }
 
+function diagnosticTone(intent: VoiceDiagnosticEntry['intent']): string {
+  switch (intent) {
+    case 'name.committed':
+    case 'name.save':    return 'text-emerald-300 border-emerald-500/25 bg-emerald-500/10';
+    case 'name.confirm': return 'text-amber-300 border-amber-500/25 bg-amber-500/10';
+    case 'name.query':   return 'text-sky-300 border-sky-500/25 bg-sky-500/10';
+    case 'tool':         return 'text-indigo-300 border-indigo-500/25 bg-indigo-500/10';
+    default:             return 'text-zinc-400 border-zinc-700/60 bg-zinc-800/40';
+  }
+}
+
+function VoiceDiagnosticsSection() {
+  const [entries, setEntries] = useState<VoiceDiagnosticEntry[]>(() => voiceDiagnosticsService.getEntries());
+  useEffect(() => voiceDiagnosticsService.subscribe(setEntries), []);
+
+  return (
+    <section>
+      <div className="mb-1.5 flex items-center justify-between px-1">
+        <h3 className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <Activity className="w-3 h-3" />
+          Voice diagnostics
+        </h3>
+        {entries.length > 0 && (
+          <button onClick={() => voiceDiagnosticsService.clear()} title="Clear" className="p-1 text-zinc-700 transition-colors hover:text-rose-400">
+            <Trash2 className="w-3 h-3" />
+          </button>
+        )}
+      </div>
+      {entries.length === 0 ? (
+        <p className="px-2 py-2 text-[10px] text-zinc-700">No voice/console turns analysed yet. Try "Remember my name is Karim" — then say it and spell it.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {entries.slice(0, 6).map(e => (
+            <div key={e.id} className="rounded-lg border border-zinc-800/60 bg-zinc-900/45 px-2.5 py-2">
+              <div className="flex items-center gap-2">
+                <span className={cn('rounded border px-1.5 py-0.5 text-[9px] font-semibold', diagnosticTone(e.intent))}>{e.intent}</span>
+                <span className="text-[9px] text-zinc-600">{e.source}</span>
+                {e.spellingMode && <span className="rounded border border-violet-500/25 bg-violet-500/10 px-1 text-[9px] text-violet-300">spelling</span>}
+                <span className="ml-auto text-[9px] text-zinc-600">{new Date(e.at).toLocaleTimeString()}</span>
+              </div>
+              <p className="mt-1 truncate text-[10px] text-zinc-400"><span className="text-zinc-600">heard </span>{e.rawText.slice(0, 90) || '—'}</p>
+              {e.cleanedText && e.cleanedText !== e.rawText && (
+                <p className="truncate text-[10px] text-zinc-500"><span className="text-zinc-600">clean </span>{e.cleanedText.slice(0, 90)}</p>
+              )}
+              {e.savedValue && <p className="text-[10px] text-emerald-300/85"><span className="text-zinc-600">saved </span>{e.savedValue}</p>}
+              <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 font-mono text-[9px] text-zinc-600">
+                {e.confidence && <span>conf {e.confidence}</span>}
+                {e.audioDurationMs != null && <span>{formatElapsed(e.audioDurationMs)} audio</span>}
+                {e.segmentCount != null && <span>{e.segmentCount} seg</span>}
+                {e.note && <span className="text-zinc-500">· {e.note}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function DetailsPanel({
   transcriptEntries,
   onClearTranscripts,
@@ -399,6 +461,27 @@ function DetailsPanel({
 }) {
   return (
     <div className="h-full overflow-y-auto p-2 space-y-3">
+      <section>
+        <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <Tag className="w-3 h-3" />
+          Build
+        </div>
+        <div className="space-y-1 rounded-lg border border-indigo-500/20 bg-indigo-500/[0.06] px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <span className="text-[12px] font-semibold text-zinc-100">v{APP_VERSION}</span>
+            <span className="rounded border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-300">{APP_PHASE}</span>
+          </div>
+          <p className="text-[10px] text-zinc-500">{APP_PHASE_LABEL}</p>
+          <div className="mt-1 grid grid-cols-[3.2rem_1fr] gap-x-2 gap-y-0.5 font-mono text-[9px]">
+            <span className="text-zinc-700">commit</span><span className="text-zinc-400">{BUILD_SHA}</span>
+            <span className="text-zinc-700">branch</span><span className="truncate text-zinc-400">{BUILD_BRANCH}</span>
+            <span className="text-zinc-700">built</span><span className="text-zinc-400">{BUILD_TIME ? `${BUILD_TIME.slice(0, 16).replace('T', ' ')} UTC` : BUILD_DATE}</span>
+          </div>
+        </div>
+      </section>
+
+      <VoiceDiagnosticsSection />
+
       <section>
         <div className="mb-1.5 flex items-center justify-between px-1">
           <h3 className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">

@@ -1,5 +1,5 @@
 /**
- * useConsoleConversation — AURA Phase 3G (Milestone 5/10)
+ * useConsoleConversation — AURA Phase 3G (Milestone 5/10), Phase 3J QA voice fix
  *
  * Text-mode conversation for the AURA console. This is what lets AURA be
  * tested through its OWN interface when voice can't be used: type a prompt,
@@ -7,8 +7,8 @@
  * prints a natural-language answer.
  *
  * It shares the SAME dispatch brain as voice (auraToolDispatchService.
- * chatWithTools) so console and voice behave identically. Turns are recorded
- * to the active session thread.
+ * chatWithTools) AND the same NameCaptureService, so console and voice capture
+ * names identically. Turns are recorded to the active session thread.
  *
  * Security: execution still routes through ToolRegistryService → the
  * allowlisted Rust layer. The console only exposes auto-approved tools to the
@@ -20,24 +20,9 @@ import { auraToolDispatchService } from '../services/tools/AuraToolDispatchServi
 import { auraPersonalityService } from '../services/personality/AuraPersonalityService';
 import { sessionThreadService } from '../services/session/SessionThreadService';
 import { toolRegistryService } from '../services/tools/ToolRegistryService';
-
-// ─── Deterministic intent shortcuts ───────────────────────────────────────────
-//
-// Small models (gpt-4o-mini) are unreliable at choosing memory tools — they tend
-// to *say* "saved" without calling the tool. For these canonical, unambiguous
-// commands we run the real tool directly so the action actually happens (and is
-// logged in the Tools panel). Everything else still goes through the model.
-
-interface MemoryIntent { toolId: string; inputs: Record<string, string>; }
-
-function detectMemoryIntent(text: string): MemoryIntent | null {
-  const nameSet = text.match(/\b(?:my name is|call me)\s+([A-Za-z][\w'’-]{0,40})/i);
-  if (nameSet) return { toolId: 'memory.setUserName', inputs: { name: nameSet[1] } };
-  if (/\b(?:what(?:'?s| is)?\s+my\s+name|who\s+am\s+i)\b/i.test(text)) {
-    return { toolId: 'memory.getUserProfile', inputs: {} };
-  }
-  return null;
-}
+import { userProfileMemoryService } from '../services/memory/UserProfileMemoryService';
+import { nameCaptureService, type NameCaptureResult } from '../services/voice/NameCaptureService';
+import { voiceDiagnosticsService } from '../services/voice/VoiceDiagnosticsService';
 
 export interface ConsoleMessage {
   id: string;
@@ -56,6 +41,8 @@ export function useConsoleConversation() {
   }]);
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
   const historyRef = useRef<Array<{ role: string; content: string }>>([]);
+  /** A name awaiting yes/no confirmation (e.g. after a heard-only voice-style entry). */
+  const pendingNameRef = useRef<string | null>(null);
 
   const push = useCallback((m: Omit<ConsoleMessage, 'id' | 'at'>) => {
     setMessages(prev => [...prev, { ...m, id: uid(), at: new Date().toISOString() }]);
@@ -68,22 +55,76 @@ export function useConsoleConversation() {
     push({ role: 'user', text });
     sessionThreadService.ensureActive();
 
-    // Deterministic shortcut for canonical memory commands — run the real tool
-    // directly instead of hoping the model calls it.
-    const intent = detectMemoryIntent(text);
-    if (intent) {
-      setBusyLabel(`Running ${intent.toolId}…`);
+    const recordTurn = (u: string, a: string) => {
+      historyRef.current = [
+        ...historyRef.current,
+        { role: 'user', content: u },
+        { role: 'assistant', content: a },
+      ].slice(-16);
+      sessionThreadService.recordTurn(u, a);
+    };
+
+    /** Run the real memory.setUserName tool so the save is logged + visible. */
+    const commitName = async (name: string, result?: NameCaptureResult) => {
+      setBusyLabel('Running memory.setUserName…');
       try {
-        const exec = await toolRegistryService.execute(intent.toolId, intent.inputs, { approved: true });
-        const textOutput = [exec.stdout, exec.stderr].filter(Boolean).join('\n').trim();
-        const auraText = textOutput || '(done)';
-        push({ role: 'aura', text: auraText, toolUsed: intent.toolId });
-        historyRef.current = [
-          ...historyRef.current,
-          { role: 'user', content: text },
-          { role: 'assistant', content: auraText },
-        ].slice(-16);
-        sessionThreadService.recordTurn(text, auraText);
+        const exec = await toolRegistryService.execute('memory.setUserName', { name }, { approved: true });
+        const toolText = [exec.stdout, exec.stderr].filter(Boolean).join('\n').trim();
+        const auraText = result?.prompt || toolText || `Saved — your name is ${name}.`;
+        push({ role: 'aura', text: auraText, toolUsed: 'memory.setUserName' });
+        recordTurn(text, auraText);
+        voiceDiagnosticsService.record({
+          source: 'typed', rawText: text, cleanedText: text, intent: 'name.committed',
+          spellingMode: result?.spelled ?? false, savedValue: name, confidence: result?.confidence,
+          note: result?.spelled ? 'spelled (authoritative)' : 'typed (trusted)',
+        });
+      } catch (err) {
+        push({ role: 'error', text: friendlyError(err) });
+      } finally {
+        setBusyLabel(null);
+      }
+    };
+
+    const knownName = userProfileMemoryService.get().name;
+
+    // ── Resolve a pending name confirmation first ──────────────────────────────
+    if (pendingNameRef.current) {
+      const pending = pendingNameRef.current;
+      // A fresh spelling/name in the reply supersedes the pending guess.
+      const reAnalyze = nameCaptureService.analyze(text, { source: 'typed', knownName });
+      if (reAnalyze.kind === 'save' && reAnalyze.name) {
+        pendingNameRef.current = null;
+        await commitName(reAnalyze.name, reAnalyze);
+        return;
+      }
+      if (nameCaptureService.isAffirmation(text)) {
+        pendingNameRef.current = null;
+        await commitName(pending, { kind: 'save', name: pending, spelled: false, confidence: 'high' });
+        return;
+      }
+      if (nameCaptureService.isNegation(text)) {
+        pendingNameRef.current = null;
+        const ask = 'No problem — what is your name? You can spell it, like "K A R I M".';
+        push({ role: 'aura', text: ask });
+        recordTurn(text, ask);
+        voiceDiagnosticsService.record({ source: 'typed', rawText: text, cleanedText: text, intent: 'name.confirm', spellingMode: false, note: 'user rejected pending name' });
+        return;
+      }
+      // Not a yes/no/respell — drop the pending guess and treat normally.
+      pendingNameRef.current = null;
+    }
+
+    // ── Deterministic name capture (shared with voice) ─────────────────────────
+    const nameResult = nameCaptureService.analyze(text, { source: 'typed', knownName });
+
+    if (nameResult.kind === 'query') {
+      setBusyLabel('Running memory.getUserProfile…');
+      try {
+        const exec = await toolRegistryService.execute('memory.getUserProfile', {}, { approved: true });
+        const auraText = [exec.stdout, exec.stderr].filter(Boolean).join('\n').trim() || '(done)';
+        push({ role: 'aura', text: auraText, toolUsed: 'memory.getUserProfile' });
+        recordTurn(text, auraText);
+        voiceDiagnosticsService.record({ source: 'typed', rawText: text, cleanedText: text, intent: 'name.query', spellingMode: false, savedValue: knownName });
       } catch (err) {
         push({ role: 'error', text: friendlyError(err) });
       } finally {
@@ -92,11 +133,28 @@ export function useConsoleConversation() {
       return;
     }
 
+    if (nameResult.kind === 'save' && nameResult.name) {
+      await commitName(nameResult.name, nameResult);
+      return;
+    }
+
+    if (nameResult.kind === 'confirm') {
+      pendingNameRef.current = nameResult.name ?? null;
+      const ask = nameResult.prompt ?? 'Could you confirm your name?';
+      push({ role: 'aura', text: ask });
+      recordTurn(text, ask);
+      voiceDiagnosticsService.record({
+        source: 'typed', rawText: text, cleanedText: text, intent: 'name.confirm',
+        spellingMode: nameResult.spelled, savedValue: nameResult.name, confidence: nameResult.confidence,
+      });
+      return;
+    }
+
+    // ── Everything else goes through the model + tool dispatch ─────────────────
     setBusyLabel('Thinking…');
 
-    const style = 'normal';
     const systemPrompt = auraPersonalityService.buildSystemPrompt({
-      responseStyle: style, includeToolAwareness: true,
+      responseStyle: 'normal', includeToolAwareness: true,
     });
 
     try {
@@ -109,15 +167,11 @@ export function useConsoleConversation() {
 
       const auraText = result.text?.trim() || '(no response)';
       push({ role: 'aura', text: auraText, toolUsed: result.toolUsed });
-
-      historyRef.current = [
-        ...historyRef.current,
-        { role: 'user', content: text },
-        { role: 'assistant', content: auraText },
-      ].slice(-16);
-
-      sessionThreadService.recordTurn(text, auraText);
-      // If the model used a memory tool, the fact is already saved by the tool.
+      recordTurn(text, auraText);
+      voiceDiagnosticsService.record({
+        source: 'typed', rawText: text, cleanedText: text,
+        intent: result.toolUsed ? 'tool' : 'chat', spellingMode: false, note: result.toolUsed,
+      });
     } catch (err) {
       push({ role: 'error', text: friendlyError(err) });
     } finally {
@@ -127,6 +181,7 @@ export function useConsoleConversation() {
 
   const clear = useCallback(() => {
     historyRef.current = [];
+    pendingNameRef.current = null;
     setMessages([{
       id: uid(), role: 'system', at: new Date().toISOString(),
       text: 'Console cleared.',

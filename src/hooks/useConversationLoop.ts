@@ -24,6 +24,9 @@ import { voiceLatencyService } from '../services/voice/VoiceLatencyService';
 import { auraMemoryService } from '../services/memory/AuraMemoryService';
 import { auraPersonalityService } from '../services/personality/AuraPersonalityService';
 import { auraToolDispatchService } from '../services/tools/AuraToolDispatchService';
+import { userProfileMemoryService } from '../services/memory/UserProfileMemoryService';
+import { nameCaptureService } from '../services/voice/NameCaptureService';
+import { voiceDiagnosticsService } from '../services/voice/VoiceDiagnosticsService';
 import { notifyVoiceError } from '../services/notifications/NotificationService';
 import type { VoiceConversationSettings, VoiceConversationTurn } from '../types/voice-session';
 import type { VADPhase } from './useVoiceActivityRecorder';
@@ -128,6 +131,8 @@ export function useConversationLoop(config: ConversationLoopConfig) {
   const sentenceFirstTTSRef    = useRef(sentenceFirstTTS);
   const toolDispatchEnabledRef = useRef(toolDispatchEnabled);
   const recordStartRef        = useRef<number | null>(null);
+  /** A name awaiting spoken yes/no confirmation across turns (voice). */
+  const pendingNameRef        = useRef<string | null>(null);
 
   useEffect(() => { settingsRef.current       = voiceSettings; }, [voiceSettings]);
   useEffect(() => { onTurnRef.current         = onTurnComplete; }, [onTurnComplete]);
@@ -344,8 +349,52 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     });
     voiceLatencyService.markChatStart(turnId);
 
+    // ── PATH 0: Deterministic name capture (shared logic with the console) ──
+    // Whisper mishears short proper nouns. Spelling is authoritative; a
+    // heard-only voice name is confirmed, never saved silently. When this
+    // resolves, AURA speaks `forcedName` and the model is skipped entirely.
+    const forcedName = await (async (): Promise<string | null> => {
+      const knownName = userProfileMemoryService.get().name;
+      const commit = (name: string, spelled: boolean, confidence?: string, ack?: string): string => {
+        userProfileMemoryService.setName(name);
+        voiceDiagnosticsService.record({
+          source: 'voice', rawText: transcript, cleanedText: transcript, intent: 'name.committed',
+          spellingMode: spelled, savedValue: name, confidence, audioDurationMs: elapsed,
+          note: spelled ? 'spelled (authoritative)' : 'voice-confirmed',
+        });
+        return ack ?? `Saved — your name is ${name}.`;
+      };
+
+      // Resolve a pending confirmation from a previous turn first.
+      if (pendingNameRef.current) {
+        const pending = pendingNameRef.current;
+        const re = nameCaptureService.analyze(transcript, { source: 'voice', knownName });
+        if (re.kind === 'save' && re.name) { pendingNameRef.current = null; return commit(re.name, re.spelled, re.confidence, re.prompt); }
+        if (nameCaptureService.isAffirmation(transcript)) { pendingNameRef.current = null; return commit(pending, false, 'high'); }
+        if (nameCaptureService.isNegation(transcript)) {
+          pendingNameRef.current = null;
+          voiceDiagnosticsService.record({ source: 'voice', rawText: transcript, cleanedText: transcript, intent: 'name.confirm', spellingMode: false, note: 'user rejected pending name' });
+          return 'No problem — what is your name? You can spell it letter by letter, like K A R I M.';
+        }
+        pendingNameRef.current = null; // not yes/no/respell — fall through to normal analysis
+      }
+
+      const r = nameCaptureService.analyze(transcript, { source: 'voice', knownName });
+      if (r.kind === 'query') {
+        voiceDiagnosticsService.record({ source: 'voice', rawText: transcript, cleanedText: transcript, intent: 'name.query', spellingMode: false, savedValue: knownName, audioDurationMs: elapsed });
+        return userProfileMemoryService.summary();
+      }
+      if (r.kind === 'save' && r.name) return commit(r.name, r.spelled, r.confidence, r.prompt);
+      if (r.kind === 'confirm') {
+        pendingNameRef.current = r.name ?? null;
+        voiceDiagnosticsService.record({ source: 'voice', rawText: transcript, cleanedText: transcript, intent: 'name.confirm', spellingMode: r.spelled, savedValue: r.name, confidence: r.confidence, audioDurationMs: elapsed });
+        return r.prompt ?? 'Could you confirm your name?';
+      }
+      return null;
+    })();
+
     // ── PATH 1: Fast mode — 1-sentence reply first ─────────────────────────
-    if (fastResponseModeRef.current) {
+    if (!forcedName && fastResponseModeRef.current) {
       const fastResult = await openAIVoiceSessionService.createFastChatResponse(transcript);
       voiceLatencyService.markChatEnd(turnId);
 
@@ -409,7 +458,11 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     let chatText: string;
     let toolUsed: string | undefined;
 
-    if (toolDispatchEnabledRef.current) {
+    if (forcedName) {
+      // Deterministic name-capture response — speak it, skip the model.
+      chatText = forcedName;
+      openAIVoiceSessionService.pushHistory(transcript, chatText);
+    } else if (toolDispatchEnabledRef.current) {
       // Use function calling — AURA can invoke tools autonomously
       try {
         const dispatchResult = await auraToolDispatchService.chatWithTools({
