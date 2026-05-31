@@ -1,27 +1,39 @@
 /**
- * NameCaptureService — AURA Phase 3J QA (voice name + spelling capture)
+ * NameCaptureService — AURA Phase 3K (redesigned, name-agnostic)
  *
- * Turns identity utterances into a reliable name even when Whisper mishears.
- * Shared by the typed console (useConsoleConversation) and the hands-free voice
- * loop (useConversationLoop) so name capture behaves identically on both.
+ * Shared name-capture logic for both the typed console and the voice loop.
+ * Works correctly for ANY name — no hardcoded names, variants, or examples.
  *
- * Recognises:
- *  - "my name is X" / "my name's X" / "call me X" / "remember my name is X"
- *  - explicit spelling:    "K A R I M", "K-A-R-I-M", "K.A.R.I.M", "K, A, R, I, M"
- *  - phonetic letters:     "kay ay are eye em"            -> KARIM
- *  - NATO spelling:        "kilo alpha romeo india mike"  -> KARIM
- *  - "as in" spelling:     "K as in kite, A as in apple"  -> KA...
- *  - name queries:         "what is my name", "who am I"
+ * Three recognition paths (in priority order):
  *
- * Safety rules (why this exists):
- *  - Spelling is AUTHORITATIVE. If the user spells it, we trust the letters even
- *    when the heard name disagrees (so a mis-heard "Kareem" never wins over a
- *    spelled "K-A-R-I-M").
- *  - A heard-only name from VOICE is never saved silently — it asks the user to
- *    confirm or spell, because Whisper routinely mishears short proper nouns.
- *  - TYPED input is trusted and saved exactly as written.
+ *  1. SPELLING (authoritative, deterministic)
+ *     - Letter-by-letter:  "K A R I M", "K-A-R-I-M", "K.A.R.I.M"
+ *     - "X as in word":    "K as in kite, A as in apple..."
+ *     - Phonetic letters:  "kay ay are eye em"  (only when a spell marker present)
+ *     - NATO alphabet:     "kilo alpha romeo india mike" (only with spell marker)
+ *     → Result: save immediately, high confidence. Spelling overrides a heard name.
  *
- * Pure string processing. No AI model calls, no I/O.
+ *  2. HEARD name (from STT)
+ *     - Typed source: trusted, save directly.
+ *     - Voice source: NEVER saved silently — always confirms first.
+ *       If it matches the already-stored name exactly → save (re-affirmation).
+ *       If it's a near-miss of the stored name (edit distance ≤ 2) → confirm.
+ *       Otherwise → confirm.
+ *
+ *  3. CORRECTION (model-assisted, async)
+ *     Called when the user says "no, that's wrong" / "it's spelled differently"
+ *     after a failed turn. Callers pass the previous heard text + conversation
+ *     history to resolveCorrection(). The model interprets the correction in
+ *     context and returns the intended name. This is where spelling errors that
+ *     Whisper introduces (e.g. "Kareem" instead of "Karim") get fixed — by the
+ *     model understanding "no, with an I not two E's", not by hardcoded rules.
+ *
+ * Design principles:
+ *  - No hardcoded names, variants, or examples anywhere in this file.
+ *  - Edit-distance check is against the STORED name only (dynamic).
+ *  - The model call in resolveCorrection() is the right tool for messy correction
+ *    utterances; deterministic parsing handles clean spelling.
+ *  - Pure: no I/O, no API calls in analyze(). resolveCorrection() is async.
  */
 
 export type NameCaptureKind = 'save' | 'confirm' | 'query' | 'none';
@@ -29,20 +41,28 @@ export type NameCaptureSource = 'typed' | 'voice';
 
 export interface NameCaptureResult {
   kind: NameCaptureKind;
-  /** Normalised, title-cased name to save / confirm (e.g. "Karim"). */
   name?: string;
-  /** The heard name before any spelling override (for diagnostics). */
   heard?: string;
-  /** Whether the name came from explicit letter spelling. */
   spelled: boolean;
-  /** Spelled-out form for read-back, e.g. "K-A-R-I-M". */
   spelledOut?: string;
   confidence: 'high' | 'medium' | 'low';
-  /** Spoken/printed line for 'save' (ack) or 'confirm' (question). */
   prompt?: string;
 }
 
-// ─── Letter maps ──────────────────────────────────────────────────────────────
+export interface CorrectionContext {
+  /** What the STT returned (the wrong text). */
+  wrongText: string;
+  /** What the user is saying now (the correction utterance). */
+  correctionText: string;
+  /** Recent conversation turns for context. */
+  history: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /** Name currently stored in memory (if any). */
+  storedName?: string;
+}
+
+// ─── Letter maps (phonetic + NATO) ───────────────────────────────────────────
+// Used only when a spelling-marker word is present in the utterance, to avoid
+// turning ordinary words ("are", "you", "echo") into letters.
 
 const PHONETIC_LETTER: Record<string, string> = {
   ay: 'A', eh: 'A',
@@ -80,122 +100,93 @@ const NATO_LETTER: Record<string, string> = {
   whiskey: 'W', whisky: 'W', xray: 'X', yankee: 'Y', zulu: 'Z',
 };
 
-/**
- * Known risky mishearings of the documented operator name "Karim".
- * These are NOT auto-corrected (that would change meaning if the user really is
- * named one of these); instead they force a confirmation step on voice input.
- */
-const KARIM_VARIANTS = new Set([
-  'kareem', 'kareim', 'karim', 'kariim', 'kareme', 'kaream', 'karam',
-  'carim', 'careem', 'kerim', 'khareem', 'khalim', 'kreem', 'kraim',
-]);
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function titleCaseName(raw: string): string {
-  const cleaned = raw.replace(/[^A-Za-z'’-]/g, '').trim();
+  const cleaned = raw.replace(/[^A-Za-z'‘’-]/g, '').trim();
   if (!cleaned) return '';
-  // Title-case each hyphen/space/apostrophe segment.
   return cleaned
     .toLowerCase()
-    .replace(/(^|[\s'’-])([a-z])/g, (_m, sep: string, ch: string) => sep + ch.toUpperCase());
+    .replace(/(^|[\s'‘’-])([a-z])/g, (_m, sep: string, ch: string) => sep + ch.toUpperCase());
 }
 
 function spellOut(name: string): string {
   return name.replace(/[^A-Za-z]/g, '').toUpperCase().split('').join('-');
 }
 
-/** Levenshtein distance, capped — used to detect near-miss mishearings. */
 function editDistance(a: string, b: string): number {
   a = a.toLowerCase(); b = b.toLowerCase();
   const m = a.length, n = b.length;
   if (Math.abs(m - n) > 3) return 99;
-  const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) => Array(n + 1).fill(0).map((_, j) => i === 0 ? j : j === 0 ? i : 0));
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
     }
   }
   return dp[m][n];
 }
 
 class NameCaptureServiceImpl {
-  /**
-   * Extract a spelled name from explicit spelling patterns.
-   * Returns UPPERCASE letters (e.g. "KARIM") or null when no spelling is found.
-   */
+
+  // ── Spelling parser ─────────────────────────────────────────────────────────
+
   parseSpelling(text: string): string | null {
     const lower = text.toLowerCase();
 
-    // Pattern A: "X as in word" — always an unambiguous spelling signal.
+    // "X as in word" — always unambiguous
     const asInLetters = [...lower.matchAll(/\b([a-z])\s+as\s+in\b/g)].map(m => m[1].toUpperCase());
     if (asInLetters.length >= 2) return asInLetters.join('');
 
-    // Only mine phonetic/NATO words when a spelling marker is present, to avoid
-    // turning ordinary speech ("are you there") into letters.
-    const hasMarker = /\b(spell(?:ed|s|t|ing)?|letter\s*by\s*letter|in\s+letters|capital)\b/.test(lower);
-
-    // Tokenise the portion most likely to contain the spelling: after a marker
-    // if present, otherwise the whole utterance (single-letter runs are safe).
-    const markerIdx = hasMarker ? lower.search(/\b(spell(?:ed|s|t|ing)?|letter\s*by\s*letter|in\s+letters)\b/) : -1;
+    // Phonetic/NATO only when a spell marker is present
+    const hasMarker = /\b(spell(?:ed|s|t|ing)?|letter[\s-]by[\s-]letter|in\s+letters|capital letters?)\b/.test(lower);
+    const markerIdx = hasMarker ? lower.search(/\b(spell(?:ed|s|t|ing)?|letter[\s-]by[\s-]letter|in\s+letters)\b/) : -1;
     const region = markerIdx >= 0 ? lower.slice(markerIdx) : lower;
     const tokens = region.split(/[\s,./-]+/).filter(Boolean);
 
     const letters: string[] = [];
-    let broke = false;
     for (const tok of tokens) {
       const t = tok.replace(/[^a-z]/g, '');
       if (!t) continue;
       if (t.length === 1 && /[a-z]/.test(t)) { letters.push(t.toUpperCase()); continue; }
       if (hasMarker && PHONETIC_LETTER[t]) { letters.push(PHONETIC_LETTER[t]); continue; }
       if (hasMarker && NATO_LETTER[t]) { letters.push(NATO_LETTER[t]); continue; }
-      // A non-letter token after we already started collecting ends the run.
-      if (letters.length > 0) { broke = true; break; }
+      if (letters.length > 0) break; // non-letter token ends the run
     }
-    void broke;
-    // Require at least 2 letters so a stray single "I" / "a" isn't treated as a name.
     return letters.length >= 2 ? letters.join('') : null;
   }
 
-  /** Detect "what is my name" / "who am I" style queries. */
+  // ── Intent detectors ────────────────────────────────────────────────────────
+
   isNameQuery(text: string): boolean {
     return /\b(what(?:'?s| is)?\s+my\s+name|who\s+am\s+i|do\s+you\s+(?:know|remember)\s+my\s+name)\b/i.test(text);
   }
 
   isAffirmation(text: string): boolean {
-    return /\b(yes|yeah|yep|yup|correct|right|that'?s right|confirmed?|save it|exactly|sure|do it)\b/i.test(text.trim());
+    return /\b(yes|yeah|yep|yup|correct|right|that'?s\s+right|confirmed?|save\s+it|exactly|sure|that's\s+it|do\s+it)\b/i.test(text.trim());
   }
 
   isNegation(text: string): boolean {
-    return /\b(no|nope|wrong|incorrect|not right|that'?s wrong|don'?t)\b/i.test(text.trim());
+    return /\b(no|nope|wrong|incorrect|not\s+right|that'?s\s+wrong|don'?t\s+save|that'?s\s+not|it'?s\s+not)\b/i.test(text.trim());
   }
 
-  /** Extract the heard name after "my name is" / "call me" / etc. */
+  isCorrectionIntent(text: string): boolean {
+    return /\b(actually|no[\s,]+it'?s|that'?s\s+wrong|wrong\s+spelling|not\s+quite|it'?s\s+spelled|i\s+said|i\s+meant|correct(?:ion)?[\s:]+|fix\s+that|it\s+should\s+be)\b/i.test(text);
+  }
+
   private extractHeardName(text: string): string | null {
-    const m = text.match(/\b(?:my name is|my name'?s|call me|i am|i'?m|name is)\s+([A-Za-z][A-Za-z'’-]{0,40})/i);
+    const m = text.match(/\b(?:my\s+name\s+is|my\s+name'?s|call\s+me|i\s+am|i'?m|name\s+is)\s+([A-Za-z][A-Za-z'‘’-]{0,40})/i);
     return m ? m[1] : null;
   }
 
   private isNameSetIntent(text: string): boolean {
-    return /\b(my name is|my name'?s|call me|remember my name|name is|spell(?:ed|s|t|ing)?)\b/i.test(text);
+    return /\b(my\s+name\s+is|my\s+name'?s|call\s+me|remember\s+my\s+name|name\s+is|spell(?:ed|s|t|ing)?)\b/i.test(text);
   }
 
-  private isRisky(name: string, knownName?: string): boolean {
-    const n = name.toLowerCase();
-    if (KARIM_VARIANTS.has(n)) return true;
-    if (knownName && knownName.trim()) {
-      const k = knownName.trim().toLowerCase();
-      if (n !== k && editDistance(n, k) <= 2) return true; // near-miss of stored name
-    }
-    return false;
-  }
+  // ── Primary analysis (sync) ────────────────────────────────────────────────
 
-  /**
-   * Analyse an utterance for identity intent and decide how to act.
-   * `knownName` is the currently-stored name (used to flag near-miss mishearings).
-   */
   analyze(text: string, opts: { source: NameCaptureSource; knownName?: string }): NameCaptureResult {
     const none: NameCaptureResult = { kind: 'none', spelled: false, confidence: 'low' };
     const raw = (text || '').trim();
@@ -211,59 +202,100 @@ class NameCaptureServiceImpl {
     const heard = heardRaw ? titleCaseName(heardRaw) : undefined;
     const spelledUpper = this.parseSpelling(raw);
 
-    // 1) Explicit spelling is authoritative.
+    // Spelling is authoritative — overrides whatever was heard
     if (spelledUpper) {
       const name = titleCaseName(spelledUpper);
       if (!name) return none;
       return {
-        kind: 'save',
-        name,
-        heard,
-        spelled: true,
-        spelledOut: spellOut(name),
-        confidence: 'high',
+        kind: 'save', name, heard, spelled: true,
+        spelledOut: spellOut(name), confidence: 'high',
         prompt: `Saved — your name is ${name}, spelled ${spellOut(name)}.`,
       };
     }
 
-    // 2) Heard-only name.
     if (heard) {
       if (opts.source === 'typed') {
         return {
-          kind: 'save',
-          name: heard,
-          heard,
-          spelled: false,
-          confidence: 'high',
-          prompt: `Got it — I'll remember your name is ${heard}.`,
+          kind: 'save', name: heard, heard, spelled: false, confidence: 'high',
+          prompt: `Got it — your name is ${heard}.`,
         };
       }
 
-      // Voice heard-only: never save silently. If it already matches the stored
-      // name exactly, treat as a harmless re-affirmation; otherwise confirm/spell.
-      const matchesStored = opts.knownName && heard.toLowerCase() === opts.knownName.trim().toLowerCase();
-      if (matchesStored) {
+      // Voice: exact match to stored name = safe re-affirmation
+      const storedLower = opts.knownName?.trim().toLowerCase();
+      if (storedLower && heard.toLowerCase() === storedLower) {
         return { kind: 'save', name: heard, heard, spelled: false, confidence: 'high', prompt: `Your name is ${heard}.` };
       }
-      const risky = this.isRisky(heard, opts.knownName);
+
+      // Near-miss of stored name or any other voice-heard name: always confirm.
+      // The user can then affirm, negate, or spell it — and if they spell it,
+      // the next turn goes through parseSpelling() which is authoritative.
+      const nearMiss = storedLower && editDistance(heard.toLowerCase(), storedLower) <= 2;
       return {
-        kind: 'confirm',
-        name: heard,
-        heard,
-        spelled: false,
+        kind: 'confirm', name: heard, heard, spelled: false,
         spelledOut: spellOut(heard),
-        confidence: risky ? 'low' : 'medium',
-        prompt: `I heard "${heard}", spelled ${spellOut(heard)}. If that's right, say "yes". If not, spell it for me — for example "K A R I M".`,
+        confidence: nearMiss ? 'low' : 'medium',
+        prompt: `I heard "${heard}" — is that right? Say "yes" to save it, or spell it letter by letter to correct it.`,
       };
     }
 
-    // Intent words present ("remember my name", "spell") but no name yet.
+    // Intent present but no name extracted yet
     return {
-      kind: 'confirm',
-      spelled: false,
-      confidence: 'low',
-      prompt: `Sure — what's your name? You can spell it letter by letter, like "K A R I M".`,
+      kind: 'confirm', spelled: false, confidence: 'low',
+      prompt: `What's your name? You can spell it letter by letter to make sure I get it right.`,
     };
+  }
+
+  // ── Model-assisted correction (async) ──────────────────────────────────────
+  //
+  // Called when the user indicates the previous STT output was wrong (e.g. says
+  // "no, it's spelled differently" or "with an I not two E's"). Passes the
+  // correction utterance + recent history to the model, which can interpret
+  // ambiguous natural-language corrections ("the vowel in the middle is I not EE")
+  // in a way that pure string parsing cannot.
+  //
+  // Returns the corrected name string, or null if the model cannot confidently
+  // resolve it (in which case the caller should ask the user to spell it out).
+
+  async resolveCorrection(ctx: CorrectionContext): Promise<string | null> {
+    try {
+      // Build a short, targeted system message — NOT the full personality prompt.
+      // We want the model to act as a correction resolver only.
+      const systemMsg = [
+        'You are resolving a name spelling correction.',
+        'The voice transcriber made an error. The user is correcting it.',
+        'Return ONLY the corrected name as the user intends it, title-cased (e.g. "James" or "Maria-Elena").',
+        'If you cannot confidently determine the correct name, reply with exactly: UNCERTAIN',
+        'Do not add any other text, explanation, or punctuation.',
+        ctx.storedName ? `Previously saved name: "${ctx.storedName}" (may itself be wrong).` : '',
+      ].filter(Boolean).join(' ');
+
+      const userMsg = [
+        `The voice transcriber heard: "${ctx.wrongText}"`,
+        `The user is now correcting it by saying: "${ctx.correctionText}"`,
+      ].join('\n');
+
+      // Lazy import to avoid circular deps
+      const { invoke } = await import('@tauri-apps/api/core');
+      const recentHistory = ctx.history.slice(-4); // last 2 turns context only
+
+      const result = await invoke<string>('openai_chat_response', {
+        transcript: userMsg,
+        responseStyle: 'brief',
+        systemPromptOverride: systemMsg,
+        history: recentHistory,
+      });
+
+      const trimmed = (result || '').trim();
+      if (!trimmed || trimmed === 'UNCERTAIN' || trimmed.length > 60) return null;
+
+      // Reject if it looks like a sentence rather than a name
+      if (trimmed.split(/\s+/).length > 4) return null;
+
+      return titleCaseName(trimmed) || null;
+    } catch {
+      return null;
+    }
   }
 }
 

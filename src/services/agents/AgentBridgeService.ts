@@ -45,7 +45,7 @@ class AgentBridgeServiceImpl {
     return s ? { ...s } : undefined;
   }
 
-  /** Run detection handshakes for all bridges. */
+  /** Run detection handshakes for all bridges, then verify with a tiny prompt. */
   async handshakeAll(): Promise<AgentBridgeState[]> {
     const [claude, codex] = await Promise.all([
       claudeBridgeService.handshake(),
@@ -54,12 +54,31 @@ class AgentBridgeServiceImpl {
     this.states.set('claude', claude);
     this.states.set('codex', codex);
     this.states.set('antigravity', antigravityBridgeService.handshake());
+    this.notify();
 
-    // Capability evidence
-    this.reg('cli.claudeCheck', claude.detected ? 'available' : 'blocked',
-      claude.detected ? 'Claude CLI detected.' : 'Claude CLI not on PATH.');
-    this.reg('cli.codexCheck', codex.detected ? 'available' : 'blocked',
-      codex.detected ? 'Codex CLI detected.' : 'Codex CLI not on PATH.');
+    // Immediately run the tiny sentinel prompt for any detected CLI.
+    // This is the real handshake — detection alone only proves the binary exists;
+    // a prompt response proves it can receive and answer instructions.
+    // approved=true because the user triggered handshakeAll explicitly.
+    const tinyPromises: Promise<void>[] = [];
+    if (claude.detected) {
+      tinyPromises.push(this.runTiny('claude', true).then(() => { /* state updated in runTiny */ }));
+    }
+    if (codex.detected) {
+      tinyPromises.push(this.runTiny('codex', true).then(() => { /* state updated in runTiny */ }));
+    }
+    // Run in parallel; errors are handled inside runTiny
+    await Promise.allSettled(tinyPromises);
+
+    // Capability evidence (post-tiny so values reflect actual response)
+    const cl = this.states.get('claude');
+    const cx = this.states.get('codex');
+    this.reg('cli.claudeCheck',
+      cl?.authenticated ? 'available' : cl?.detected ? 'degraded' : 'blocked',
+      cl?.authenticated ? 'Claude CLI detected and responded to sentinel.' : cl?.detected ? 'Detected but sentinel failed.' : 'Claude CLI not on PATH.');
+    this.reg('cli.codexCheck',
+      cx?.authenticated ? 'available' : cx?.detected ? 'degraded' : 'blocked',
+      cx?.authenticated ? 'Codex CLI detected and responded to sentinel.' : cx?.detected ? 'Detected but sentinel failed.' : 'Codex CLI not on PATH.');
 
     this.notify();
     return this.getAll();

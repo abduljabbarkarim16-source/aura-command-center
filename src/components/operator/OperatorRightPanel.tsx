@@ -420,7 +420,7 @@ function VoiceDiagnosticsSection() {
         )}
       </div>
       {entries.length === 0 ? (
-        <p className="px-2 py-2 text-[10px] text-zinc-700">No voice/console turns analysed yet. Try "Remember my name is Karim" — then say it and spell it.</p>
+        <p className="px-2 py-2 text-[10px] text-zinc-700">No voice/console turns analysed yet. Try "Remember my name is ..." — say it, then spell it if needed.</p>
       ) : (
         <div className="space-y-1.5">
           {entries.slice(0, 6).map(e => (

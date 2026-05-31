@@ -11,9 +11,9 @@
  *   0.3.2  - Phase 3C (voice conversation MVP - STT/Chat/TTS via Tauri backend)
  */
 
-export const APP_VERSION = '0.5.1';
-export const APP_PHASE   = 'Phase 3J QA';
-export const APP_PHASE_LABEL = 'Visual + Voice Fix';
+export const APP_VERSION = '0.5.2';
+export const APP_PHASE   = 'Phase 3K';
+export const APP_PHASE_LABEL = 'Local Nervous System';
 export const BUILD_DATE  = '2026-05-31';
 
 /**
@@ -54,6 +54,21 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version:  '0.5.2',
+    phase:    'Phase 3K',
+    date:     '2026-05-31',
+    summary:  'Local Nervous System',
+    highlights: [
+      'Persistent memory: durable file store (%APPDATA%) survives NSIS reinstalls',
+      'Agent handshake: sentinel prompt dispatched + verified on every handshake, not just detected',
+      'Name correction: fully name-agnostic (no hardcoded names); history-aware model resolves ambiguous corrections',
+      'Local STT: faster-whisper 1.2.1 installed; AURA tries local transcription first, falls back to API',
+      'Ollama service + model router: local reflex tier (Phi-3.5-mini) for intent/cleanup/correction',
+      'LiveCanvas: real <canvas> Layer 2 — audio-reactive particles (listening/speaking), orbital ring (thinking), diagram templates',
+      'Silent upgrade: UpgradeService snapshots memory before install, restores + verifies after; startup system check on version change',
+    ],
+  },
   {
     version:  '0.5.1',
     phase:    'Phase 3J QA',

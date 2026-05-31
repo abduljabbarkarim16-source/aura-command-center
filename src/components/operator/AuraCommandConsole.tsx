@@ -26,7 +26,7 @@ const QUICK_PROMPTS = [
   'Check git status',
   'Check Claude CLI',
   'Check Codex CLI',
-  'Remember my name is Karim',
+  'Remember my name is ...',
   'What can you do?',
 ];
 

@@ -43,12 +43,15 @@ const MAX_HISTORY_TURNS = 5;
 // Passed to Whisper as `prompt` so domain terms and the operator's name transcribe
 // correctly (Whisper biases toward spellings it has just "seen" in the prompt).
 
+// Project-domain vocabulary for Whisper biasing — no user names here.
+// The saved name is appended dynamically at call time from UserProfileMemoryService.
 const TRANSCRIPTION_VOCAB =
-  'AURA, Karim, Claude, Codex, Antigravity, Tauri, Make.com, OpenAI, Whisper, Gemini, VAD, RuntimeTask, WebView2, ai-build-memory, agent-command-center';
+  'AURA, Claude, Codex, Antigravity, Tauri, Make.com, OpenAI, Whisper, Gemini, VAD, RuntimeTask, WebView2, ai-build-memory, agent-command-center';
 
-function buildTranscriptionPrompt(name?: string): string {
-  const base = `AURA operator console. Terms: ${TRANSCRIPTION_VOCAB}.`;
-  return name && name.trim() ? `${base} The user's name is ${name.trim()}.` : base;
+function buildTranscriptionPrompt(savedName?: string): string {
+  const base = `AURA operator console. Domain terms: ${TRANSCRIPTION_VOCAB}.`;
+  // Append the stored name so Whisper biases toward it — dynamic, not hardcoded.
+  return savedName?.trim() ? `${base} The operator's name is ${savedName.trim()}.` : base;
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -70,30 +73,46 @@ class OpenAIVoiceSessionServiceImpl {
 
   async transcribeAudio(audioBlob: Blob, promptOverride?: string): Promise<VoiceTranscriptionResult> {
     const start = Date.now();
-    try {
-      // Convert blob to byte array for Tauri transfer
-      const buffer = await audioBlob.arrayBuffer();
-      const audioBytes = Array.from(new Uint8Array(buffer));
-      const contentType = audioBlob.type || 'audio/webm';
 
-      // Build the vocabulary/spelling hint (project terms + the user's saved name)
-      // unless the caller supplied one. Lazy import avoids any module cycle.
-      let prompt = promptOverride;
-      if (prompt === undefined) {
-        try {
-          const { userProfileMemoryService } = await import('../memory/UserProfileMemoryService');
-          prompt = buildTranscriptionPrompt(userProfileMemoryService.getDisplayName());
-        } catch {
-          prompt = buildTranscriptionPrompt();
-        }
+    // Build vocabulary hint (domain terms + saved name).
+    let prompt = promptOverride;
+    if (prompt === undefined) {
+      try {
+        const { userProfileMemoryService } = await import('../memory/UserProfileMemoryService');
+        prompt = buildTranscriptionPrompt(userProfileMemoryService.getDisplayName());
+      } catch {
+        prompt = buildTranscriptionPrompt();
       }
+    }
 
+    const buffer = await audioBlob.arrayBuffer();
+    const audioBytes = Array.from(new Uint8Array(buffer));
+    const contentType = audioBlob.type || 'audio/webm';
+
+    // ── Try local Whisper first (free, private, often more accurate) ──────────
+    if ('__TAURI_INTERNALS__' in window) {
+      try {
+        const localText = await invoke<string>('local_transcribe_audio', {
+          audioBytes,
+          contentType,
+          prompt,
+        });
+        if (localText !== undefined && localText !== null) {
+          return { success: true, text: localText.trim(), latencyMs: Date.now() - start };
+        }
+      } catch {
+        // Local STT unavailable (faster-whisper not installed, script not found, etc.)
+        // Fall through to API path — no error surfaced to the user.
+      }
+    }
+
+    // ── Fall back to OpenAI Whisper API ───────────────────────────────────────
+    try {
       const text = await invoke<string>('openai_transcribe_audio', {
         audioBytes,
         contentType,
         prompt,
       });
-
       return { success: true, text: text.trim(), latencyMs: Date.now() - start };
     } catch (err) {
       return { success: false, error: String(err), latencyMs: Date.now() - start };

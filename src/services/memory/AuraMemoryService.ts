@@ -1,7 +1,10 @@
 /**
- * AuraMemoryService — AURA Phase 3G
+ * AuraMemoryService — AURA Phase 3G / Phase 3K (persistent store)
  *
- * Persistent memory store for AURA. Survives restarts via localStorage.
+ * Persistent memory store for AURA. Phase 3K: writes to both localStorage
+ * (fast reads) AND the Tauri file store (%APPDATA%\com.aura.commandcenter\persist\)
+ * so memory survives NSIS reinstalls that wipe the WebView2 data partition.
+ *
  * Two sources: auto-extracted from conversation and user-explicit.
  * Two categories: personal (about the user) and task (project/work).
  *
@@ -9,6 +12,7 @@
  */
 
 import type { AuraMemory, MemoryCategory, MemorySource } from '../../types/aura-memory';
+import { persistentStore } from '../storage/PersistentStoreService';
 
 const STORAGE_KEY  = 'aura.memory.store';
 const MAX_MEMORIES = 150;
@@ -20,18 +24,20 @@ function uid(): string {
   return `mem-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function load(): AuraMemory[] {
+function loadSync(): AuraMemory[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY)
+      ?? localStorage.getItem(`persist:${STORAGE_KEY}`); // fallback: written by persistentStore
     if (!raw) return [];
     return JSON.parse(raw) as AuraMemory[];
   } catch { return []; }
 }
 
-function save(memories: AuraMemory[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(memories.slice(0, MAX_MEMORIES)));
-  } catch { /* storage full */ }
+function saveSync(memories: AuraMemory[]): void {
+  const json = JSON.stringify(memories.slice(0, MAX_MEMORIES));
+  try { localStorage.setItem(STORAGE_KEY, json); } catch { /* full */ }
+  // Fire-and-forget durable write — no await needed for correctness
+  persistentStore.set(STORAGE_KEY, json).catch(() => { /* non-blocking */ });
 }
 
 function promptQuote(value: string): string {
@@ -43,7 +49,24 @@ class AuraMemoryServiceImpl {
   private listeners = new Set<MemoryListener>();
 
   constructor() {
-    this.memories = load();
+    // Synchronous load from localStorage on construction (fast, works immediately).
+    // A background migration from the durable file store runs after Tauri is ready.
+    this.memories = loadSync();
+    this.migrateFromDurableStore();
+  }
+
+  private async migrateFromDurableStore(): Promise<void> {
+    try {
+      const durable = await persistentStore.getJSON<AuraMemory[]>(STORAGE_KEY);
+      if (!durable || !Array.isArray(durable) || durable.length === 0) return;
+      // Only apply if the durable store has MORE entries than what localStorage gave us
+      // (reinstall scenario: localStorage empty, file store has prior data).
+      if (durable.length > this.memories.length) {
+        this.memories = durable.slice(0, MAX_MEMORIES);
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.memories)); } catch { /* full */ }
+        this.notify();
+      }
+    } catch { /* non-critical */ }
   }
 
   subscribe(fn: MemoryListener): () => void {
@@ -95,7 +118,7 @@ class AuraMemoryServiceImpl {
     };
 
     this.memories = [memory, ...this.memories].slice(0, MAX_MEMORIES);
-    save(this.memories);
+    saveSync(this.memories);
     this.notify();
     return memory;
   }
@@ -115,7 +138,7 @@ class AuraMemoryServiceImpl {
       if (m.id !== id) return m;
       return { ...m, ...patch, updatedAt: new Date().toISOString() };
     });
-    save(this.memories);
+    saveSync(this.memories);
     this.notify();
   }
 
@@ -125,19 +148,19 @@ class AuraMemoryServiceImpl {
 
   delete(id: string) {
     this.memories = this.memories.filter(m => m.id !== id);
-    save(this.memories);
+    saveSync(this.memories);
     this.notify();
   }
 
   clearAuto() {
     this.memories = this.memories.filter(m => m.source === 'explicit' || m.status === 'pinned');
-    save(this.memories);
+    saveSync(this.memories);
     this.notify();
   }
 
   clearAll() {
     this.memories = [];
-    save(this.memories);
+    saveSync(this.memories);
     this.notify();
   }
 
@@ -172,7 +195,7 @@ class AuraMemoryServiceImpl {
     this.memories = this.memories.map(m =>
       chosenIds.has(m.id) ? { ...m, usageCount: m.usageCount + 1 } : m,
     );
-    save(this.memories);
+    saveSync(this.memories);
     this.notify();
 
     const personal = chosen.filter(m => m.category === 'personal');

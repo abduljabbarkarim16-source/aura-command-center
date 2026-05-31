@@ -1,6 +1,7 @@
 mod cli_commands;
 mod commands;
 mod config_commands;
+mod persist_commands;
 mod voice_commands;
 
 // Walk up the directory tree from `start`, trying to load a `.env` file.
@@ -97,8 +98,13 @@ pub fn run() {
             voice_commands::openai_chat_tool_result,
             voice_commands::openai_extract_memory,
             voice_commands::openai_synthesize_speech,
+            voice_commands::local_transcribe_audio,
             cli_commands::spawn_agent_session,
             cli_commands::get_cli_help,
+            persist_commands::persist_read,
+            persist_commands::persist_write,
+            persist_commands::persist_delete,
+            persist_commands::persist_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

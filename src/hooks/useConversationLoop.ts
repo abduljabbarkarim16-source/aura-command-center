@@ -133,6 +133,8 @@ export function useConversationLoop(config: ConversationLoopConfig) {
   const recordStartRef        = useRef<number | null>(null);
   /** A name awaiting spoken yes/no confirmation across turns (voice). */
   const pendingNameRef        = useRef<string | null>(null);
+  /** Previous turn's raw transcript — used to give the model correction context. */
+  const prevTranscriptRef     = useRef<string>('');
 
   useEffect(() => { settingsRef.current       = voiceSettings; }, [voiceSettings]);
   useEffect(() => { onTurnRef.current         = onTurnComplete; }, [onTurnComplete]);
@@ -371,10 +373,22 @@ export function useConversationLoop(config: ConversationLoopConfig) {
         const re = nameCaptureService.analyze(transcript, { source: 'voice', knownName });
         if (re.kind === 'save' && re.name) { pendingNameRef.current = null; return commit(re.name, re.spelled, re.confidence, re.prompt); }
         if (nameCaptureService.isAffirmation(transcript)) { pendingNameRef.current = null; return commit(pending, false, 'high'); }
-        if (nameCaptureService.isNegation(transcript)) {
+        if (nameCaptureService.isNegation(transcript) || nameCaptureService.isCorrectionIntent(transcript)) {
+          // User is correcting — ask the model to interpret it in context.
+          const corrected = await nameCaptureService.resolveCorrection({
+            wrongText: pending,
+            correctionText: transcript,
+            storedName: knownName,
+            history: openAIVoiceSessionService.getHistorySlice(4) as Array<{ role: 'user' | 'assistant'; content: string }>,
+          });
+          if (corrected) {
+            pendingNameRef.current = corrected; // ask user to confirm the resolved name
+            voiceDiagnosticsService.record({ source: 'voice', rawText: transcript, cleanedText: transcript, intent: 'name.confirm', spellingMode: false, savedValue: corrected, note: 'model-resolved correction' });
+            return `I think you mean "${corrected}" — is that right? Say "yes" or spell it out to confirm.`;
+          }
           pendingNameRef.current = null;
-          voiceDiagnosticsService.record({ source: 'voice', rawText: transcript, cleanedText: transcript, intent: 'name.confirm', spellingMode: false, note: 'user rejected pending name' });
-          return 'No problem — what is your name? You can spell it letter by letter, like K A R I M.';
+          voiceDiagnosticsService.record({ source: 'voice', rawText: transcript, cleanedText: transcript, intent: 'name.confirm', spellingMode: false, note: 'user rejected pending name, model uncertain' });
+          return `No problem — what is your name? Spell it letter by letter to make sure I get it right.`;
         }
         pendingNameRef.current = null; // not yes/no/respell — fall through to normal analysis
       }

@@ -1,7 +1,7 @@
 {
-  "version": "0.5.1",
-  "phase": "3J QA",
-  "phaseName": "Visual + Voice Fix",
+  "version": "0.5.2",
+  "phase": "3K",
+  "phaseName": "Local Nervous System",
   "updated": "2026-05-31",
   "agent": "Claude (Anthropic / claude-opus-4-8)",
   "note": "Design-time manifest. Runtime status is refined by CapabilityRegistryService.test(); items marked 'testable' are confirmed live, not asserted here.",

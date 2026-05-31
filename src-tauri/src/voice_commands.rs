@@ -745,3 +745,82 @@ pub async fn openai_synthesize_speech(
     let bytes = res.bytes().await.map_err(|e| e.to_string())?;
     Ok(bytes.to_vec())
 }
+
+// ─── Local STT (faster-whisper) ───────────────────────────────────────────────
+//
+// Calls the Python sidecar script scripts/local_stt.py with a temp audio file.
+// On success, returns the transcript text (same shape as openai_transcribe_audio).
+// On failure, returns Err so the frontend can fall back to the API path.
+//
+// AURA_STT_PROMPT env var is set before spawning so the script biases vocabulary.
+
+#[tauri::command]
+pub fn local_transcribe_audio(
+    audio_bytes: Vec<u8>,
+    content_type: String,
+    prompt: Option<String>,
+) -> Result<String, String> {
+    use std::io::Write;
+
+    if audio_bytes.is_empty() {
+        return Err("Audio bytes are empty".to_string());
+    }
+
+    // Write audio to a temp file
+    let ext = if content_type.contains("wav") { "wav" } else if content_type.contains("mp4") || content_type.contains("m4a") { "m4a" } else { "webm" };
+    let tmp_path = std::env::temp_dir().join(format!("aura_stt_{}.{ext}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()));
+    {
+        let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("Cannot write temp audio: {e}"))?;
+        f.write_all(&audio_bytes).map_err(|e| format!("Cannot write audio bytes: {e}"))?;
+    }
+
+    // Resolve path to local_stt.py relative to the executable (installed app)
+    // or CWD (dev mode).
+    let script = {
+        let exe_rel = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("scripts").join("local_stt.py")))
+            .filter(|p| p.exists());
+        let cwd_rel = std::env::current_dir()
+            .ok()
+            .map(|d| d.join("scripts").join("local_stt.py"))
+            .filter(|p| p.exists());
+        exe_rel.or(cwd_rel)
+    };
+
+    let script = match script {
+        Some(s) => s,
+        None => {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err("local_stt.py not found — local STT unavailable".to_string());
+        }
+    };
+
+    // Spawn python with the script
+    let mut cmd = std::process::Command::new("python");
+    cmd.arg(&script)
+       .arg(tmp_path.to_string_lossy().as_ref())
+       .arg("en");
+    if let Some(p) = &prompt {
+        cmd.env("AURA_STT_PROMPT", p);
+    }
+
+    let output = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output();
+
+    let _ = std::fs::remove_file(&tmp_path); // always clean up
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let text = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            Ok(text)
+        }
+        Ok(o) => {
+            let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            Err(format!("Local STT failed: {err}"))
+        }
+        Err(e) => Err(format!("Local STT spawn error: {e}")),
+    }
+}

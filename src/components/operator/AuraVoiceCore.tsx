@@ -28,7 +28,7 @@ import { auraPersonalityService } from '../../services/personality/AuraPersonali
 import { cn } from '../../lib/utils';
 import { AuraVoiceVisualizer } from './AuraVoiceVisualizer';
 import type { VisualizerState } from './AuraVoiceVisualizer';
-import { AmbientCanvas, type AmbientState } from './AmbientCanvas';
+import { LiveCanvas, type CanvasMode } from './LiveCanvas';
 import { AdminVoiceIndicator } from './AdminVoiceIndicator';
 import type { AdminVoiceState } from './AdminVoiceIndicator';
 import { ApprovalTray } from './ApprovalTray';
@@ -526,14 +526,14 @@ export function AuraVoiceCore({
     ? effectivePhaseForVisualizer
     : RUNTIME_TO_VISUALIZER[runtime.state] ?? 'idle';
 
-  // Map the visualizer state onto the living ambient background behind the orb.
-  const ambientState: AmbientState =
+  // Map the visualizer state to the LiveCanvas mode (Layer 2).
+  const canvasMode: CanvasMode =
     effectiveVis === 'executing' || effectiveVis === 'waiting_for_approval' ? 'working'
       : effectiveVis === 'listening' ? 'listening'
         : effectiveVis === 'thinking' ? 'thinking'
           : effectiveVis === 'speaking' ? 'speaking'
-            : effectiveVis === 'error' ? 'error'
-              : 'idle';
+            : effectiveVis === 'error' ? 'ambient'
+              : 'ambient';
 
   const adminState: AdminVoiceState = (() => {
     if (runtime.isMuted) return 'muted';
@@ -598,8 +598,12 @@ export function AuraVoiceCore({
   // --- Render ---------------------------------------------------------------
   return (
     <div className="relative flex flex-col h-full min-h-0 w-full bg-zinc-950 overflow-hidden">
-      {/* Living visual work surface — premium when idle, reactive to voice/task state */}
-      <AmbientCanvas state={ambientState} />
+      {/* LiveCanvas — Layer 2: audio-reactive particle surface + diagram mode */}
+      <LiveCanvas
+        mode={canvasMode}
+        micLevel={micLevel}
+        audioAmplitude={micLevel}
+      />
       <NotificationToast position="top-right" maxVisible={3} />
 
       {/* -- Status strip: orb-centric, minimal top -- */}

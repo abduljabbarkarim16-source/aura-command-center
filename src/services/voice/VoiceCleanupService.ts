@@ -22,7 +22,6 @@
 
 const VOCAB_CORRECTIONS: Array<[RegExp, string]> = [
   [/\baura\b/gi,             'AURA'],
-  [/\bkarim\b/g,             'Karim'],   // normalise capitalisation only; mishearings (Kareem...) are confirmed, not rewritten
   [/\bclaude\b/gi,           'Claude'],
   [/\bcodex\b/gi,            'Codex'],
   [/\btauri\b/gi,            'Tauri'],
