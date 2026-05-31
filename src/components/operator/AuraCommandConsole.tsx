@@ -28,6 +28,8 @@ import { AgentBridgesPanel } from './AgentBridgesPanel';
 import { SelfTestPanel } from './SelfTestPanel';
 import { PermissionModeSelector } from './PermissionModeSelector';
 import { CapabilityGapsPanel } from './CapabilityGapsPanel';
+import { LivingVisualCanvas } from './LivingVisualCanvas';
+import { RecipePanel } from './RecipePanel';
 
 // ─── Quick test prompts (compact, not oversized pills) ─────────────────────────
 
@@ -146,7 +148,7 @@ interface AuraCommandConsoleProps {
   onOpenDetails: () => void;
 }
 
-type RightTab = 'activity' | 'bridges' | 'capabilities' | 'gaps' | 'memory' | 'selftest';
+type RightTab = 'activity' | 'bridges' | 'capabilities' | 'gaps' | 'memory' | 'selftest' | 'recipes';
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -208,6 +210,7 @@ export function AuraCommandConsole({ onBack, onOpenAdmin, onOpenDetails }: AuraC
         <div className="flex flex-col flex-1 min-w-0">
           <div className="flex-1 min-h-0 overflow-y-auto">
             <div className="max-w-3xl mx-auto w-full px-4 py-3 flex flex-col gap-3">
+              <LivingVisualCanvas />
               {messages.map(m => <MessageRow key={m.id} msg={m} />)}
               {busyLabel && (
                 <div className="flex items-center gap-2 text-[11px] text-zinc-500 pl-7">
@@ -254,6 +257,7 @@ export function AuraCommandConsole({ onBack, onOpenAdmin, onOpenDetails }: AuraC
           <div className="shrink-0 flex items-center border-b border-zinc-800/60 overflow-x-auto custom-scrollbar">
             {([
               { id: 'activity' as const, label: 'Tools', icon: <Wrench className="w-3 h-3" /> },
+              { id: 'recipes' as const, label: 'Recipes', icon: <Bot className="w-3 h-3" /> },
               { id: 'bridges' as const, label: 'Bridges', icon: <Bot className="w-3 h-3" /> },
               { id: 'capabilities' as const, label: 'Caps', icon: <ShieldCheck className="w-3 h-3" /> },
               { id: 'gaps' as const, label: 'Gaps', icon: <Lightbulb className="w-3 h-3" /> },
@@ -269,6 +273,7 @@ export function AuraCommandConsole({ onBack, onOpenAdmin, onOpenDetails }: AuraC
           </div>
           <div className="flex-1 min-h-0">
             {tab === 'activity' && <ToolActivity />}
+            {tab === 'recipes' && <RecipePanel />}
             {tab === 'bridges' && <AgentBridgesPanel />}
             {tab === 'capabilities' && <CapabilitiesPanel />}
             {tab === 'gaps' && <CapabilityGapsPanel />}

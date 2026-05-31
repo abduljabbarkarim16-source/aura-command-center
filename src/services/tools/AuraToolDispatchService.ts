@@ -18,6 +18,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { toolRegistryService, TOOL_CATALOG } from './ToolRegistryService';
 import type { ToolDefinition } from '../../types/tools';
+import { runtimeTaskService } from '../runtime/RuntimeTaskService';
+import type { RuntimeTaskType } from '../../types/runtime-task';
 
 // ─── OpenAI function schema builder ───────────────────────────────────────────
 
@@ -101,7 +103,7 @@ class AuraToolDispatchServiceImpl {
 
   async executeToolCall(
     call: ParsedToolCall,
-    options: { approved?: boolean } = {},
+    options: { approved?: boolean; taskId?: string } = {},
   ): Promise<string> {
     try {
       const result = await toolRegistryService.execute(call.toolId, call.args, options);
@@ -153,13 +155,30 @@ class AuraToolDispatchServiceImpl {
       return { text: 'I tried to use a tool but it wasn\'t available. Let me answer directly.' };
     }
 
+    // ── Create the task so it's visible while waiting for approval
+    let taskType: RuntimeTaskType = 'system';
+    if (tool.category === 'terminal') taskType = 'terminal';
+    else if (tool.category === 'cli_agent') taskType = 'cli';
+    else if (tool.category === 'memory') taskType = 'memory';
+    else if (tool.category === 'capability') taskType = 'capability';
+
+    const task = runtimeTaskService.createTask({
+      title: `Tool: ${tool.name}`,
+      type: taskType,
+      source: 'voice', // We default to voice for chatWithTools
+      risk: tool.risk,
+      toolId: toolId
+    });
+
     // Approval gate for medium-risk tools
     let approved = !tool.requiresApproval;
     if (tool.requiresApproval && params.onApprovalNeeded) {
+      runtimeTaskService.blockTask(task.id, 'Waiting for human approval');
       approved = await params.onApprovalNeeded(toolId);
     }
 
     if (!approved) {
+      runtimeTaskService.failTask(task.id, 'Approval denied or blocked');
       return { text: `I need your approval to run ${tool.name}. You can approve it in the panel.` };
     }
 
@@ -169,7 +188,7 @@ class AuraToolDispatchServiceImpl {
     // approval and onApprovalNeeded returned true; otherwise the permission mode
     // decides (auto for low-risk in Safe Auto, blocked in Locked, etc.).
     const humanApproved = tool.requiresApproval && approved;
-    const toolResult = await this.executeToolCall(parsed, { approved: humanApproved });
+    const toolResult = await this.executeToolCall(parsed, { approved: humanApproved, taskId: task.id });
 
     // Follow-up call — model converts tool result to natural speech
     const followUp = await invoke<string>('openai_chat_tool_result', {

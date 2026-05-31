@@ -1,5 +1,6 @@
 import { Folders, Bot, ChevronDown, Keyboard } from 'lucide-react';
 import { mockProjects, mockAgents } from '../store/mockData';
+import { RuntimeTaskBadge } from './operator/RuntimeTaskBadge';
 
 export function TopBar() {
   const activeProj = mockProjects[0];
@@ -36,6 +37,9 @@ export function TopBar() {
         </div>
 
         <div className="h-4 w-px bg-zinc-800 hidden sm:block" />
+        
+        {/* Runtime Task Badge */}
+        <RuntimeTaskBadge />
 
         {/* Active agent pill */}
         <button className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 rounded-lg cursor-pointer transition-all group">

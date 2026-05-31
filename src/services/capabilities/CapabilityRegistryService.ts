@@ -28,6 +28,7 @@ import { auraToolDispatchService } from '../tools/AuraToolDispatchService';
 import { cliDiscoveryService } from '../agents/CliDiscoveryService';
 import { auraMemoryService } from '../memory/AuraMemoryService';
 import { auraPersonalityService } from '../personality/AuraPersonalityService';
+import { runtimeTaskService } from '../runtime/RuntimeTaskService';
 
 const DOCS = 'docs/phase-3g-internal-agent-os.md';
 
@@ -297,6 +298,17 @@ class CapabilityRegistryServiceImpl {
       case 'blocked':   reason = `No — ${c.name} is blocked: ${c.evidence.lastError ?? 'a prerequisite is missing'}.`; break;
       default:          reason = `I'm not sure — ${c.name} hasn't been tested this session. Ask me to test it.`;
     }
+    
+    if (can) {
+      const recentSuccess = runtimeTaskService.listRecent().find(t => 
+        t.status === 'completed' && 
+        (t.toolId === id || (c.requiredTools && c.requiredTools.includes(t.toolId || '')))
+      );
+      if (recentSuccess) {
+        reason += ` (Evidence: Last used successfully ${new Date(recentSuccess.completedAt!).toLocaleTimeString()})`;
+      }
+    }
+    
     return { id, can, status: c.status, reason };
   }
 

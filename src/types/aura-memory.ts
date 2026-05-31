@@ -7,7 +7,7 @@
  */
 
 export type MemoryCategory = 'personal' | 'task';
-export type MemorySource   = 'auto'     | 'explicit';
+export type MemorySource   = 'auto' | 'explicit' | 'user' | 'mistake_correction';
 export type MemoryStatus   = 'active'   | 'pinned' | 'archived';
 
 export interface AuraMemory {
