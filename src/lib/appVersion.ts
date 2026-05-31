@@ -11,9 +11,9 @@
  *   0.3.2  - Phase 3C (voice conversation MVP - STT/Chat/TTS via Tauri backend)
  */
 
-export const APP_VERSION = '0.5.4';
+export const APP_VERSION = '0.5.5';
 export const APP_PHASE   = 'Phase 3K+';
-export const APP_PHASE_LABEL = 'STT Fix + Model Upgrade';
+export const APP_PHASE_LABEL = 'Hallucination Fix + Task Sequencer';
 export const BUILD_DATE  = '2026-05-31';
 
 /**

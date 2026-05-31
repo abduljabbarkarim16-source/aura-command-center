@@ -41,13 +41,13 @@ const CHAT_MODEL: &str = "gpt-4o";
 const TTS_MODEL: &str = "tts-1-hd";
 const STT_MODEL: &str = "gpt-4o-transcribe";
 
-/// Known Whisper hallucination substrings. Whisper was trained on YouTube videos and
-/// podcasts; when given silence or very low-energy audio it frequently hallucinates these.
-/// We reject any transcript that contains these patterns.
+/// Known hallucination substrings — Whisper/gpt-4o-transcribe on silence tends to
+/// output YouTube/podcast phrases or short looping fillers.
+/// Phase 3K+: expanded with gpt-4o-transcribe observed patterns on silence.
 const HALLUCINATION_SUBSTRINGS: &[&str] = &[
+    // YouTube/podcast hallucinations (Whisper training data)
     "thank you for watching",
     "thanks for watching",
-    "thank you for watching.",
     "please subscribe",
     "like and subscribe",
     "don't forget to subscribe",
@@ -58,29 +58,71 @@ const HALLUCINATION_SUBSTRINGS: &[&str] = &[
     "transcribed by",
     "captions by",
     "provided by",
+    // gpt-4o-transcribe observed silence hallucinations
+    "or a operator",
+    "the operator",
+    "or the operator",
+    // Common near-silence hallucinations
     "[music]",
     "[silence]",
     "[applause]",
     "[laughter]",
+    "[background noise]",
+    "[no audio]",
+    "[inaudible]",
+    "(music)",
+    "(silence)",
+    "(applause)",
 ];
 
-/// Returns true if the transcript looks like a Whisper hallucination rather than
-/// real speech. Checks two things:
-///   1. Known YouTube/podcast hallucination patterns
-///   2. No alphabetic characters at all (pure emoji / symbol output)
+/// Returns true if the transcript is almost certainly a hallucination.
+///
+/// Checks (in order):
+///   1. Known silence/podcast hallucination substrings
+///   2. Repetitive phrase loop — same short phrase repeated 3+ times
+///      (catches "or a operator or a operator..." regardless of exact phrase)
+///   3. Pure non-alphabetic output (emoji/symbol noise)
 fn is_likely_hallucination(text: &str) -> bool {
     let lower = text.to_lowercase();
+    let trimmed = lower.trim();
+
+    // 1. Known patterns
     for pattern in HALLUCINATION_SUBSTRINGS {
-        if lower.contains(pattern) {
+        if trimmed.contains(pattern) {
             return true;
         }
     }
-    // If the entire output has no alphabetic characters it is almost certainly hallucinated
-    // noise (e.g. a stream of emoji).
-    let has_alpha = lower.chars().any(|c| c.is_alphabetic());
-    if !has_alpha && !text.trim().is_empty() {
+
+    // 2. Repetitive phrase loop detector.
+    //    Split into words, then look for any window of 2-5 words that repeats
+    //    3 or more times consecutively — a strong sign of hallucination.
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    let word_count = words.len();
+    if word_count >= 6 {
+        'repetition: for phrase_len in 2usize..=5 {
+            if phrase_len * 3 > word_count { break 'repetition; }
+            let mut i = 0;
+            while i + phrase_len * 3 <= word_count {
+                let phrase = &words[i..i + phrase_len];
+                let mut repeats = 1usize;
+                let mut j = i + phrase_len;
+                while j + phrase_len <= word_count && &words[j..j + phrase_len] == phrase {
+                    repeats += 1;
+                    j += phrase_len;
+                }
+                if repeats >= 3 {
+                    return true;
+                }
+                i += 1;
+            }
+        }
+    }
+
+    // 3. No alphabetic characters at all
+    if !trimmed.is_empty() && !trimmed.chars().any(|c| c.is_alphabetic()) {
         return true;
     }
+
     false
 }
 

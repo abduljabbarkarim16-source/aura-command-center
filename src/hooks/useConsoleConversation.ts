@@ -23,6 +23,7 @@ import { toolRegistryService } from '../services/tools/ToolRegistryService';
 import { userProfileMemoryService } from '../services/memory/UserProfileMemoryService';
 import { nameCaptureService, type NameCaptureResult } from '../services/voice/NameCaptureService';
 import { voiceDiagnosticsService } from '../services/voice/VoiceDiagnosticsService';
+import { sequentialTaskRunner, detectSequenceIntent } from '../services/tasks/SequentialTaskRunnerService';
 
 export interface ConsoleMessage {
   id: string;
@@ -84,6 +85,27 @@ export function useConsoleConversation() {
         setBusyLabel(null);
       }
     };
+
+    // ── Sequence detection — runs before everything else ──────────────────────
+    const sequenceId = detectSequenceIntent(text);
+    if (sequenceId) {
+      const seq = sequentialTaskRunner.listSequences().find(s => s.id === sequenceId);
+      const label = seq?.label ?? sequenceId;
+      push({ role: 'aura', text: `Running ${label} — ${seq?.stepCount ?? '?'} checks. I'll report when done.` });
+      setBusyLabel(`Running ${label}…`);
+      try {
+        const result = await sequentialTaskRunner.run(sequenceId, (step, i, total) => {
+          setBusyLabel(`[${i + 1}/${total}] ${step.label}…`);
+        });
+        push({ role: 'aura', text: result.summary, toolUsed: sequenceId });
+        recordTurn(text, result.summary);
+      } catch (err) {
+        push({ role: 'error', text: friendlyError(err) });
+      } finally {
+        setBusyLabel(null);
+      }
+      return;
+    }
 
     const knownName = userProfileMemoryService.get().name;
 

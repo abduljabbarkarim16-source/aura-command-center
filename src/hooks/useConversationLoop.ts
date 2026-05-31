@@ -27,6 +27,7 @@ import { auraToolDispatchService } from '../services/tools/AuraToolDispatchServi
 import { userProfileMemoryService } from '../services/memory/UserProfileMemoryService';
 import { nameCaptureService } from '../services/voice/NameCaptureService';
 import { voiceDiagnosticsService } from '../services/voice/VoiceDiagnosticsService';
+import { sequentialTaskRunner, detectSequenceIntent } from '../services/tasks/SequentialTaskRunnerService';
 import { notifyVoiceError } from '../services/notifications/NotificationService';
 import type { VoiceConversationSettings, VoiceConversationTurn } from '../types/voice-session';
 import type { VADPhase } from './useVoiceActivityRecorder';
@@ -351,7 +352,53 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     });
     voiceLatencyService.markChatStart(turnId);
 
-    // ── PATH 0: Deterministic name capture (shared logic with the console) ──
+    // ── PATH 0a: Sequence detection — runs before name capture and model ─────
+    const sequenceId = detectSequenceIntent(transcript);
+    if (sequenceId) {
+      const seq = sequentialTaskRunner.listSequences().find(s => s.id === sequenceId);
+      const label = seq?.label ?? sequenceId;
+      setLiveTranscript({ user: transcript, aura: `Running ${label}…` });
+      try {
+        const result = await sequentialTaskRunner.run(sequenceId, (step, i, total) => {
+          setLiveTranscript({ user: transcript, aura: `[${i + 1}/${total}] ${step.label}…` });
+        });
+        // Push to TTS so AURA speaks the summary
+        const chatText = result.summary;
+        openAIVoiceSessionService.pushHistory(transcript, chatText);
+        voiceLatencyService.abort(turnId);
+        // Speak the result
+        updatePhase('preparing_voice');
+        const tts = await openAIVoiceSessionService.synthesizeSpeech(chatText, settingsRef.current.ttsVoice);
+        if (tts.success && tts.audioBlobUrl) {
+          setCurrentAudioUrl(tts.audioBlobUrl);
+          updatePhase('speaking');
+          const audio = new Audio(tts.audioBlobUrl);
+          audioRef.current = audio;
+          audio.play().catch(() => {});
+          audio.onended = () => {
+            URL.revokeObjectURL(tts.audioBlobUrl!);
+            setCurrentAudioUrl(null);
+            runningRef.current = false;
+            if (autoListenRef.current) startListeningCycle();
+            else updatePhase('idle');
+          };
+        } else {
+          runningRef.current = false;
+          if (autoListenRef.current) startListeningCycle();
+          else updatePhase('idle');
+        }
+        setLiveTranscript({ user: transcript, aura: chatText });
+        const turn: VoiceConversationTurn = { id: `turn-${Date.now()}`, userText: transcript, auraText: chatText, timestamp: new Date().toISOString(), chatLatencyMs: 0 };
+        onTurnRef.current(turn);
+      } catch {
+        runningRef.current = false;
+        if (autoListenRef.current) startListeningCycle();
+        else updatePhase('idle');
+      }
+      return;
+    }
+
+    // ── PATH 0b: Deterministic name capture (shared logic with the console) ──
     // Whisper mishears short proper nouns. Spelling is authoritative; a
     // heard-only voice name is confirmed, never saved silently. When this
     // resolves, AURA speaks `forcedName` and the model is skipped entirely.
