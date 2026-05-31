@@ -16,7 +16,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, Settings2, LayoutGrid, Bot, Send, Trash2, Loader2,
-  Wrench, ShieldCheck, Brain, CheckCircle2, XCircle, ChevronRight, Zap,
+  Wrench, ShieldCheck, Brain, CheckCircle2, XCircle, ChevronRight, Zap, Lightbulb,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useConsoleConversation, type ConsoleMessage } from '../../hooks/useConsoleConversation';
@@ -26,6 +26,8 @@ import { CapabilitiesPanel } from './CapabilitiesPanel';
 import { MemoryPanel } from './MemoryPanel';
 import { AgentBridgesPanel } from './AgentBridgesPanel';
 import { SelfTestPanel } from './SelfTestPanel';
+import { PermissionModeSelector } from './PermissionModeSelector';
+import { CapabilityGapsPanel } from './CapabilityGapsPanel';
 
 // ─── Quick test prompts (compact, not oversized pills) ─────────────────────────
 
@@ -144,7 +146,7 @@ interface AuraCommandConsoleProps {
   onOpenDetails: () => void;
 }
 
-type RightTab = 'activity' | 'bridges' | 'capabilities' | 'memory' | 'selftest';
+type RightTab = 'activity' | 'bridges' | 'capabilities' | 'gaps' | 'memory' | 'selftest';
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -186,6 +188,7 @@ export function AuraCommandConsole({ onBack, onOpenAdmin, onOpenDetails }: AuraC
             : <><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /><span className="text-[10px] text-emerald-500">ready</span></>}
         </div>
         <div className="ml-auto flex items-center gap-1.5">
+          <PermissionModeSelector />
           <button onClick={clear} title="Clear console"
             className="px-2 py-1 rounded-md text-[10px] font-medium text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60 transition-all">
             <Trash2 className="w-3 h-3 inline mr-1" />Clear
@@ -248,16 +251,17 @@ export function AuraCommandConsole({ onBack, onOpenAdmin, onOpenDetails }: AuraC
 
         {/* Right panel */}
         <aside className="hidden md:flex flex-col w-80 shrink-0 border-l border-zinc-800/60 bg-zinc-950/40">
-          <div className="shrink-0 flex items-center border-b border-zinc-800/60">
+          <div className="shrink-0 flex items-center border-b border-zinc-800/60 overflow-x-auto custom-scrollbar">
             {([
               { id: 'activity' as const, label: 'Tools', icon: <Wrench className="w-3 h-3" /> },
               { id: 'bridges' as const, label: 'Bridges', icon: <Bot className="w-3 h-3" /> },
               { id: 'capabilities' as const, label: 'Caps', icon: <ShieldCheck className="w-3 h-3" /> },
+              { id: 'gaps' as const, label: 'Gaps', icon: <Lightbulb className="w-3 h-3" /> },
               { id: 'memory' as const, label: 'Mem', icon: <Brain className="w-3 h-3" /> },
               { id: 'selftest' as const, label: 'Test', icon: <Zap className="w-3 h-3" /> },
             ]).map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
-                className={cn('flex items-center gap-1 px-2.5 py-2 text-[10px] font-medium border-b-2 transition-colors',
+                className={cn('flex items-center gap-1 px-2.5 py-2 text-[10px] font-medium border-b-2 transition-colors whitespace-nowrap',
                   tab === t.id ? 'border-indigo-500 text-zinc-200' : 'border-transparent text-zinc-500 hover:text-zinc-300')}>
                 {t.icon}{t.label}
               </button>
@@ -267,6 +271,7 @@ export function AuraCommandConsole({ onBack, onOpenAdmin, onOpenDetails }: AuraC
             {tab === 'activity' && <ToolActivity />}
             {tab === 'bridges' && <AgentBridgesPanel />}
             {tab === 'capabilities' && <CapabilitiesPanel />}
+            {tab === 'gaps' && <CapabilityGapsPanel />}
             {tab === 'memory' && <MemoryPanel />}
             {tab === 'selftest' && <SelfTestPanel />}
           </div>

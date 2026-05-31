@@ -112,7 +112,7 @@ export function Dashboard() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse flex-shrink-0" />
-                <span className="text-[11px] font-semibold text-indigo-400 uppercase tracking-widest">Phase 2G</span>
+                <span className="text-[11px] font-semibold text-indigo-400 uppercase tracking-widest">Phase 3G · Internal Agent OS</span>
               </div>
               <h3 className="text-[16px] font-semibold text-zinc-100 leading-snug">
                 {activeProj.name}
@@ -137,9 +137,9 @@ export function Dashboard() {
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-[13px] text-zinc-400">
               <Bot className="w-4 h-4 text-indigo-400" />
-              <span className="font-medium text-zinc-300">Claude Architect</span>
+              <span className="font-medium text-zinc-300">AURA</span>
               <span className="text-zinc-600">·</span>
-              <span className="text-zinc-500">anthropic / claude-sonnet-4-6</span>
+              <span className="text-zinc-500">internal agent operating system</span>
             </div>
             <button
               onClick={() => navigate('/')}

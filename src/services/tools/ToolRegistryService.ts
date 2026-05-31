@@ -15,6 +15,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { ToolDefinition, ToolExecution } from '../../types/tools';
 import { cliSessionService } from '../agents/CliSessionService';
 import { cliDiscoveryService } from '../agents/CliDiscoveryService';
+import { permissionModeService } from '../permissions/PermissionModeService';
 
 function uid(): string {
   return `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -262,8 +263,16 @@ class ToolRegistryServiceImpl {
   ): Promise<ToolExecution> {
     const tool = this.getTool(toolId);
     if (!tool) throw new Error(`Unknown tool: ${toolId}`);
-    if (tool.requiresApproval && !options.approved) {
-      throw new Error(`Tool '${tool.name}' requires user approval before running.`);
+
+    // Permission-mode gate. This is a frontend convenience layer; the real
+    // safety boundary is the Rust allowlist. `approved` means an explicit human
+    // (or operator self-test) action — the model's auto-selection passes false.
+    const { decision, reason } = permissionModeService.decide(tool);
+    if (decision === 'block') {
+      throw new Error(`Execution blocked: ${reason}`);
+    }
+    if (decision === 'ask' && !options.approved) {
+      throw new Error(`Tool '${tool.name}' requires approval: ${reason}`);
     }
 
     // Validate inputs
