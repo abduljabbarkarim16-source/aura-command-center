@@ -24,9 +24,9 @@ import { DataSourceNotice } from '../common/DataSourceNotice';
 // ─── Mock data ────────────────────────────────────────────────────────────────
 
 const MOCK_PROJECTS = [
-  { id: 'p1', name: 'AURA Phase 2E',    status: 'active',    progress: 72, agent: 'Claude Architect' },
-  { id: 'p2', name: 'Relay Integration', status: 'paused',    progress: 44, agent: 'Codex Dev' },
-  { id: 'p3', name: 'Memory Schema v2',  status: 'completed', progress: 100, agent: 'Claude Architect' },
+  { id: 'p1', name: 'AURA Phase 3G — Internal Agent OS', status: 'active', progress: 90, agent: 'AURA' },
+  { id: 'p2', name: 'Agent bridges',     status: 'active',    progress: 80, agent: 'AURA' },
+  { id: 'p3', name: 'Capability registry', status: 'completed', progress: 100, agent: 'AURA' },
 ];
 
 const MOCK_RELAYS = [
@@ -35,8 +35,8 @@ const MOCK_RELAYS = [
 ];
 
 const MOCK_HANDOFFS = [
-  { id: 'h1', from: 'Claude Architect', to: 'Codex Dev',  objective: 'Implement Phase 2E voice core', status: 'pending' },
-  { id: 'h2', from: 'Codex Dev',        to: 'Test Agent', objective: 'Run lint + build validation',   status: 'completed' },
+  { id: 'h1', from: 'AURA', to: 'Claude CLI', objective: 'Implement next capability gap', status: 'pending' },
+  { id: 'h2', from: 'AURA', to: 'Codex CLI',  objective: 'Run lint + build validation',   status: 'completed' },
 ];
 
 const MOCK_HEALTH = [

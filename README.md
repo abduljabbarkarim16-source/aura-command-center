@@ -2,7 +2,7 @@
 
 **AURA** - *Autonomous Unified Reasoning Agent* - is a voice-first AI desktop operator built with Tauri, Rust, React, and TypeScript.
 
-**Current version:** v0.4.1 - Phase 3G
+**Current version:** v0.4.3 - Phase 3G (Internal Agent Operating System)
 
 ## What Works Now
 

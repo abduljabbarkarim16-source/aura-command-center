@@ -165,8 +165,11 @@ class AuraToolDispatchServiceImpl {
 
     params.onToolDispatched?.(toolId);
 
-    // Execute the tool
-    const toolResult = await this.executeToolCall(parsed, { approved: true });
+    // Execute the tool. A human only "approved" it if the tool actually required
+    // approval and onApprovalNeeded returned true; otherwise the permission mode
+    // decides (auto for low-risk in Safe Auto, blocked in Locked, etc.).
+    const humanApproved = tool.requiresApproval && approved;
+    const toolResult = await this.executeToolCall(parsed, { approved: humanApproved });
 
     // Follow-up call — model converts tool result to natural speech
     const followUp = await invoke<string>('openai_chat_tool_result', {

@@ -11,9 +11,9 @@
  *   0.3.2  — Phase 3C (voice conversation MVP — STT/Chat/TTS via Tauri backend)
  */
 
-export const APP_VERSION = '0.4.1';
+export const APP_VERSION = '0.4.3';
 export const APP_PHASE   = 'Phase 3G';
-export const APP_PHASE_LABEL = 'Audit Hardening';
+export const APP_PHASE_LABEL = 'Internal Agent OS';
 export const BUILD_DATE  = '2026-05-31';
 
 /** Full display string shown in Settings header and About chip */
@@ -30,8 +30,24 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version:  '0.4.1',
+    version:  '0.4.3',
     phase:    'Phase 3G',
+    date:     '2026-05-31',
+    summary:  'Internal Agent Operating System',
+    highlights: [
+      'Capability registry: can/whyNot/test/recommendUpgrade with evidence',
+      'Structured user profile + session-thread continuity + compaction',
+      'Live console dispatch — AURA can be tested through its own console',
+      'memory.* and capabilities.* tools the model can call',
+      'Agent bridges (Claude/Codex/Antigravity) with connection state',
+      'Internal self-test harness, capability gap planner',
+      'Permission modes (Safe Auto / Approval / Admin Bypass / Locked)',
+      'Voice Core + Console UI decluttered; mock console data removed',
+    ],
+  },
+  {
+    version:  '0.4.1',
+    phase:    'Phase 3F QA',
     date:     '2026-05-31',
     summary:  'Audit Hardening',
     highlights: [

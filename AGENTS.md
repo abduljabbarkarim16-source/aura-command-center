@@ -1,8 +1,8 @@
 # AGENTS.md — AURA Agent Collaboration Rules
 
 **Project:** AURA Command Center
-**Version:** Phase 3E
-**Last updated:** 2026-05-30
+**Version:** Phase 3G — Internal Agent OS (v0.4.3)
+**Last updated:** 2026-05-31
 
 ---
 
