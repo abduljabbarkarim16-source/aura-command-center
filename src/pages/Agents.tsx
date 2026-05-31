@@ -1,5 +1,6 @@
 import { mockAgents } from '../store/mockData';
 import { Bot, Settings2, Power } from 'lucide-react';
+import { DataSourceNotice } from '../components/common/DataSourceNotice';
 
 export function Agents() {
   return (
@@ -10,6 +11,8 @@ export function Agents() {
           <p className="text-zinc-400 text-sm">Configure AI providers and routing capabilities</p>
         </div>
       </div>
+
+      <DataSourceNotice detail="Agent cards are currently rendered from local mock data. Provider key status and smoke tests live in Settings." />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {mockAgents.map(agent => (

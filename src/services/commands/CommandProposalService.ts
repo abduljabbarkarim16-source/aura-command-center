@@ -287,21 +287,21 @@ class CommandProposalService {
     );
 
     const completedAt = now();
-    const succeeded = nativeResult.allowed && nativeResult.exit_code === 0 && !nativeResult.error;
+    const succeeded = nativeResult.allowed && nativeResult.exitCode === 0 && !nativeResult.error;
 
     // Build execution result
     const result: CommandExecutionResult = {
       proposalId: id,
       startedAt: proposal.proposedAt,
       completedAt,
-      exitCode: nativeResult.exit_code,
+      exitCode: nativeResult.exitCode,
       stdout: nativeResult.stdout,
       stderr: nativeResult.stderr,
       succeeded,
       summary: succeeded
-        ? `Command succeeded (exit code 0, ${nativeResult.duration_ms}ms)`
-        : nativeResult.error ?? `Failed with exit code ${nativeResult.exit_code}`,
-      durationMs: nativeResult.duration_ms,
+        ? `Command succeeded (exit code 0, ${nativeResult.durationMs}ms)`
+        : nativeResult.error ?? `Failed with exit code ${nativeResult.exitCode}`,
+      durationMs: nativeResult.durationMs,
     };
 
     // Update proposal status and store result
@@ -310,7 +310,7 @@ class CommandProposalService {
       voiceRuntimeService.emit('tool_completed', {
         toolName: proposal.command,
         proposalId: id,
-        durationMs: nativeResult.duration_ms,
+        durationMs: nativeResult.durationMs,
       });
     } else {
       this.markFailed(id, result.summary);
@@ -326,11 +326,11 @@ class CommandProposalService {
       severity: succeeded ? 'success' : 'error',
       category: 'tool',
       title: succeeded
-        ? `Executed: ${proposal.command} (${nativeResult.duration_ms}ms)`
+        ? `Executed: ${proposal.command} (${nativeResult.durationMs}ms)`
         : `Failed: ${proposal.command} — ${result.summary}`,
       detail: JSON.stringify({
-        exitCode: nativeResult.exit_code,
-        durationMs: nativeResult.duration_ms,
+        exitCode: nativeResult.exitCode,
+        durationMs: nativeResult.durationMs,
         stdoutLines: nativeResult.stdout.split('\n').length,
         stderrLines: nativeResult.stderr.split('\n').length,
       }),

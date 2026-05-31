@@ -5,7 +5,7 @@
  * Pure CSS / mock state — no real audio capture.
  */
 
-import React from 'react';
+import type { ReactNode } from 'react';
 import { Mic, MicOff, Radio } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -20,7 +20,6 @@ interface AdminVoiceIndicatorProps {
 
 // ─── Bar config ───────────────────────────────────────────────────────────────
 
-const BAR_COUNT  = 9;
 const BAR_PEAKS  = [0.3, 0.5, 0.75, 0.9, 1.0, 0.9, 0.75, 0.5, 0.3];
 const BAR_DELAYS = [0, 60, 120, 180, 100, 140, 80, 40, 20]; // ms
 
@@ -31,7 +30,7 @@ const STATE_CFG: Record<AdminVoiceState, {
   labelColor: string;
   barColor: string;
   dotColor: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   animate: boolean;
 }> = {
   idle: {

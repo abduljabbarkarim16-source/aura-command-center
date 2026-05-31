@@ -11,6 +11,7 @@ import { Search, Filter, Database, BrainCircuit, Download, RefreshCw } from 'luc
 import { mockMemory } from '../store/mockData';
 import { settingsService } from '../services/settings/SettingsService';
 import type { PersistedMemoryEntry, MemoryCategory } from '../types/persistence';
+import { DataSourceNotice } from '../components/common/DataSourceNotice';
 
 const ALL_CATEGORIES: MemoryCategory[] = ['decision', 'error', 'fix', 'task', 'handoff', 'tool_log'];
 
@@ -43,6 +44,7 @@ const categoryStyle: Record<MemoryCategory, string> = {
 export function Memory() {
   const [entries, setEntries] = useState<PersistedMemoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [seededFromMock, setSeededFromMock] = useState(false);
   const [activeCategory, setActiveCategory] = useState<MemoryCategory | 'all'>('all');
   const [search, setSearch] = useState('');
 
@@ -53,6 +55,9 @@ export function Memory() {
       const seed = seedFromMock();
       for (const e of seed) await settingsService.addMemoryEntry(e);
       stored = seed;
+      setSeededFromMock(true);
+    } else {
+      setSeededFromMock(false);
     }
     setEntries(stored);
     setIsLoading(false);
@@ -127,6 +132,10 @@ export function Memory() {
           </button>
         </div>
       </div>
+
+      {seededFromMock && (
+        <DataSourceNotice detail="No saved project-memory entries were found, so this session was initialized with seed data from the demo fixture." />
+      )}
 
       {/* Main card */}
       <div className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex flex-col">

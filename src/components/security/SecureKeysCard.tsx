@@ -9,6 +9,7 @@
  * - The key is sent to Rust via invoke() and written server-side.
  * - The key is never echoed back or stored in React state after saving.
  * - The input is type="password" so it is masked on screen.
+ * - This is local AppData .env storage, not OS keychain/Stronghold storage.
  */
 
 import { useState, useEffect } from 'react';
@@ -72,7 +73,7 @@ export function SecureKeysCard() {
           <div>
             <h3 className="text-[14px] font-semibold text-zinc-200">OpenAI API Key</h3>
             <p className="text-[11px] text-zinc-500 mt-0.5">
-              Required for voice (Whisper STT + GPT-4o-mini + TTS). Saved to your user AppData — never sent to the cloud.
+              Required for voice (Whisper STT + GPT-4o-mini + TTS). Saved locally in user AppData as an .env file.
             </p>
           </div>
         </div>
@@ -99,7 +100,7 @@ export function SecureKeysCard() {
         {status === 'saved' && (
           <div className="flex items-center gap-2 text-[12px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-xl">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
-            Key saved and active — voice should work immediately. No restart needed.
+            Key saved to local AppData and active — voice should work immediately. No restart needed.
           </div>
         )}
         {status === 'error' && (
@@ -181,7 +182,7 @@ export function SecureKeysCard() {
             <p className="text-[10px] text-zinc-600">
               Get your key at <span className="text-zinc-400">platform.openai.com/api-keys</span>.
               It starts with <span className="font-mono text-zinc-400">sk-</span>.
-              Saved to <span className="font-mono text-zinc-500">%APPDATA%\com.aura.commandcenter\.env</span>
+              Saved locally to <span className="font-mono text-zinc-500">%APPDATA%\com.aura.commandcenter\.env</span>. This is not OS keychain storage.
             </p>
           </div>
         )}

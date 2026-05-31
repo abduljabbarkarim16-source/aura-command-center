@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
-  Sparkles, User, AlertTriangle, GitBranch, Wrench,
+  Sparkles, User, AlertTriangle, GitBranch,
   ChevronDown, ChevronUp, CheckCircle2, XCircle, Clock,
   AlertOctagon, ShieldAlert, Info, Loader2
 } from 'lucide-react';
@@ -39,7 +39,7 @@ export interface AssistantMsg extends BaseMessage {
 
 export interface SystemMessage extends BaseMessage {
   type: 'system';
-  icon?: React.ReactNode;
+  icon?: ReactNode;
   title: string;
   summary?: string;
   expandable?: boolean;
@@ -95,14 +95,14 @@ function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-const riskConfig: Record<RiskLevel, { label: string; color: string; border: string; icon: React.ReactNode }> = {
+const riskConfig: Record<RiskLevel, { label: string; color: string; border: string; icon: ReactNode }> = {
   low:      { label: 'Low Risk',      color: 'text-zinc-400',   border: 'border-l-zinc-600',  icon: <Info className="w-3.5 h-3.5" /> },
   medium:   { label: 'Medium Risk',   color: 'text-amber-400',  border: 'border-l-amber-500', icon: <AlertTriangle className="w-3.5 h-3.5" /> },
   high:     { label: 'High Risk',     color: 'text-orange-400', border: 'border-l-orange-500', icon: <AlertOctagon className="w-3.5 h-3.5" /> },
   critical: { label: 'Critical Risk', color: 'text-rose-400',   border: 'border-l-rose-500',  icon: <ShieldAlert className="w-3.5 h-3.5" /> },
 };
 
-const toolStatusConfig: Record<ToolStatusState, { label: string; icon: React.ReactNode; color: string }> = {
+const toolStatusConfig: Record<ToolStatusState, { label: string; icon: ReactNode; color: string }> = {
   running:   { label: 'Running',   icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,     color: 'text-indigo-400' },
   completed: { label: 'Completed', icon: <CheckCircle2 className="w-3.5 h-3.5" />,              color: 'text-emerald-400' },
   failed:    { label: 'Failed',    icon: <XCircle className="w-3.5 h-3.5" />,                   color: 'text-rose-400' },

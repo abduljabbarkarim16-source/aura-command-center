@@ -5,9 +5,9 @@
  * No real audio capture. Mic/voice buttons are placeholders for future integration.
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
 import {
-  Mic, MicOff, Send, Paperclip, Square, ChevronDown
+  Mic, MicOff, Send, Paperclip, Square
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { AuraVoiceVisualizer, type VisualizerState } from './AuraVoiceVisualizer';
@@ -87,7 +87,7 @@ export function AuraComposer({
     setTimeout(() => setInternalState('idle'), 2000);
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();

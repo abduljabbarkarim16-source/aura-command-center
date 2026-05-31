@@ -18,11 +18,11 @@
         "resizable": true,
         "fullscreen": false,
         "theme": "Dark",
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required"
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI --autoplay-policy=no-user-gesture-required"
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' asset: http://asset.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; font-src 'self' data:; media-src 'self' asset: http://asset.localhost data: blob:; connect-src 'self' ipc: http://ipc.localhost https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://*.make.com http://localhost:* ws://localhost:*"
     }
   },
   "bundle": {

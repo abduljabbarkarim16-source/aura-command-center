@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { mockCommands } from '../../mock/commands';
-import { Terminal, Check, X, AlertTriangle, AlertOctagon, History, PlayCircle, Archive } from 'lucide-react';
+import { Terminal, Check, X, AlertTriangle, AlertOctagon, PlayCircle, Archive } from 'lucide-react';
 import { QueuedCommand, CommandStatus } from '../../types/commands';
 import { cn } from '../../lib/utils';
 

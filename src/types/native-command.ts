@@ -15,15 +15,17 @@ export interface NativeCommandResult {
   /** Arguments passed to the program */
   args: string[];
   /** Process exit code (-1 if process failed to start) */
-  exit_code: number;
+  exitCode: number;
   /** Captured stdout */
   stdout: string;
   /** Captured stderr */
   stderr: string;
   /** Execution duration in milliseconds */
-  duration_ms: number;
+  durationMs: number;
   /** Whether the command was in the allowlist */
   allowed: boolean;
+  /** Working directory used by the Rust command bridge */
+  cwd?: string;
   /** Error message if command was rejected or process failed */
   error: string | null;
 }

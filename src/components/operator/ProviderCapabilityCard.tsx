@@ -9,7 +9,7 @@
  *  - Uses providerRegistry for source of truth
  */
 
-import React, { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import {
   CheckCircle2, XCircle, Lock, Network, BrainCircuit,
   Sparkles, Bot, Orbit, MessageSquare, Volume2, Mic2, Radio,
@@ -132,7 +132,7 @@ export function ProviderCapabilityCard({ className, compact = false }: ProviderC
       <div className="flex items-center gap-2 px-5 py-3 border-t border-zinc-800/30 bg-zinc-950/20">
         <Lock className="w-3 h-3 text-zinc-600 flex-shrink-0" />
         <p className="text-[10px] text-zinc-600 leading-relaxed">
-          Keys are read securely from the vault or environment. Values are never stored in localStorage, source code, or logs.
+          Keys are read from the current environment or the local AppData .env file. Values are never stored in localStorage, source code, or logs.
         </p>
       </div>
     </div>

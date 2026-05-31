@@ -1,4 +1,3 @@
-import React from 'react';
 import { MissionStatusCard } from './MissionStatusCard';
 import { ApprovalCard } from './ApprovalCard';
 import { Server, Zap } from 'lucide-react';

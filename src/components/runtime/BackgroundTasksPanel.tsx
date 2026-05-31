@@ -1,6 +1,5 @@
 import { ListTree, Play, Pause, XSquare, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
 import { mockRuntimeState } from '../../mock/runtime';
-import { cn } from '../../lib/utils';
 import { BackgroundTask } from '../../types/runtime';
 
 function TaskItem({ task }: { task: BackgroundTask, key?: string }) {

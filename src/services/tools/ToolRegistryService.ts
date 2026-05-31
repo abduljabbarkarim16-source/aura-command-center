@@ -12,7 +12,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { ToolDefinition, ToolExecution, ToolStatus } from '../../types/tools';
+import type { ToolDefinition, ToolExecution } from '../../types/tools';
 import { cliSessionService } from '../agents/CliSessionService';
 import { cliDiscoveryService } from '../agents/CliDiscoveryService';
 

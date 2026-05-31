@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ShieldCheck, XCircle, CheckCircle2, AlertCircle, Play, Zap, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { selfBuildOrchestrator } from '../../services/self-build/SelfBuildOrchestratorService';

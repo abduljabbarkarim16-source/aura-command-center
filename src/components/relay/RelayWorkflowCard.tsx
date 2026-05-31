@@ -1,5 +1,4 @@
-import React from 'react';
-import { Send, Download, GitBranch, ArrowRight } from 'lucide-react';
+import { Download, GitBranch, ArrowRight } from 'lucide-react';
 import { RelayExchange } from '../../types/relay';
 import { ApprovalCard } from '../operator/ApprovalCard';
 

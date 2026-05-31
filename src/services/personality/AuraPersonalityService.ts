@@ -12,6 +12,8 @@ import { DEFAULT_PERSONALITY, PRESET_DESCRIPTIONS } from '../../types/aura-perso
 import { auraMemoryService } from '../memory/AuraMemoryService';
 
 const STORAGE_KEY = 'aura.personality.config';
+const MAX_CUSTOM_PROMPT_CHARS = 1_500;
+const MAX_USER_NAME_CHARS = 80;
 
 // Base identity — always present regardless of preset
 const BASE_IDENTITY =
@@ -66,8 +68,8 @@ class AuraPersonalityServiceImpl {
   }
 
   setPreset(preset: PersonalityPreset) { this.update({ preset }); }
-  setCustomPrompt(text: string)        { this.update({ customPrompt: text }); }
-  setUserName(name: string)            { this.update({ userName: name }); }
+  setCustomPrompt(text: string)        { this.update({ customPrompt: text.trim().slice(0, MAX_CUSTOM_PROMPT_CHARS) }); }
+  setUserName(name: string)            { this.update({ userName: name.trim().slice(0, MAX_USER_NAME_CHARS) }); }
 
   reset() {
     this.config = { ...DEFAULT_PERSONALITY };
@@ -93,14 +95,16 @@ class AuraPersonalityServiceImpl {
     parts.push(BASE_IDENTITY.replace('{AURA_NAME}', auraName));
 
     // 2. Personality — custom prompt overrides preset
-    const personalityDesc = cfg.customPrompt.trim()
-      ? cfg.customPrompt.trim()
+    const customPrompt = cfg.customPrompt.trim().slice(0, MAX_CUSTOM_PROMPT_CHARS);
+    const personalityDesc = customPrompt
+      ? customPrompt
       : PRESET_DESCRIPTIONS[cfg.preset];
     parts.push(personalityDesc);
 
     // 3. User name if set
-    if (cfg.userName.trim()) {
-      parts.push(`The user's name is ${cfg.userName.trim()}. Address them by name occasionally but naturally.`);
+    const userName = cfg.userName.trim().slice(0, MAX_USER_NAME_CHARS);
+    if (userName) {
+      parts.push(`The user's name is ${JSON.stringify(userName)}. Address them by name occasionally but naturally.`);
     }
 
     // 4. Injected memories

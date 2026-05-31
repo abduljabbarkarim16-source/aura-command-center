@@ -8,10 +8,10 @@
  * Other tabs are clean placeholders ready for future wiring.
  */
 
-import React, { Fragment, useState, useEffect, useCallback } from 'react';
+import { Fragment, useState, useEffect, useCallback, type ReactNode } from 'react';
 import {
   Bell, ListTodo, MessageSquare, Map, Terminal, GitMerge,
-  FolderOpen, ScrollText, ChevronLeft, ChevronRight, Trash2, Download,
+  FolderOpen, ScrollText, Trash2, Download,
   X, PanelRightOpen, PanelRightClose,
 } from 'lucide-react';
 import { TerminalPanel } from './TerminalPanel';
@@ -26,7 +26,7 @@ import { NOTIFICATION_DISPLAY } from '../../types/notifications';
 
 type TabId = 'notifications' | 'tasks' | 'transcript' | 'planning' | 'terminal' | 'diff' | 'files' | 'logs';
 
-const TABS: { id: TabId; label: string; icon: React.ReactNode; badge?: boolean }[] = [
+const TABS: { id: TabId; label: string; icon: ReactNode; badge?: boolean }[] = [
   { id: 'notifications', label: 'Notifications', icon: <Bell className="w-3.5 h-3.5" />, badge: true },
   { id: 'tasks',         label: 'Tasks',         icon: <ListTodo className="w-3.5 h-3.5" /> },
   { id: 'transcript',    label: 'Transcript',    icon: <MessageSquare className="w-3.5 h-3.5" /> },

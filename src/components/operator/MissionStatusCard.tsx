@@ -1,4 +1,3 @@
-import React from 'react';
 import { Target, Clock, Bot, ArrowRight, History } from 'lucide-react';
 
 export interface MissionStatusCardProps {

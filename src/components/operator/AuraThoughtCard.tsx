@@ -5,10 +5,10 @@
  * Concise — no raw logs. Fade in, optional auto-dismiss.
  */
 
-import React, { useEffect, useState, useRef, Fragment } from 'react';
+import { useEffect, useState, useRef, Fragment, type ReactNode } from 'react';
 import {
   Target, Workflow, ShieldAlert, Wrench, Database,
-  Zap, Bot, CheckCircle2, AlertCircle, Info,
+  Bot, CheckCircle2, AlertCircle, Info,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -42,7 +42,7 @@ interface AuraThoughtCardProps {
 // ─── Variant config ───────────────────────────────────────────────────────────
 
 const VARIANT_CFG: Record<ThoughtVariant, {
-  icon: React.ReactNode;
+  icon: ReactNode;
   border: string;
   bg: string;
   textColor: string;

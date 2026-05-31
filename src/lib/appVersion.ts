@@ -11,10 +11,10 @@
  *   0.3.2  — Phase 3C (voice conversation MVP — STT/Chat/TTS via Tauri backend)
  */
 
-export const APP_VERSION = '0.3.2';
-export const APP_PHASE   = 'Phase 3C';
-export const APP_PHASE_LABEL = 'Voice Conversation MVP';
-export const BUILD_DATE  = '2026-05-29';
+export const APP_VERSION = '0.4.1';
+export const APP_PHASE   = 'Phase 3G';
+export const APP_PHASE_LABEL = 'Audit Hardening';
+export const BUILD_DATE  = '2026-05-31';
 
 /** Full display string shown in Settings header and About chip */
 export const VERSION_DISPLAY = `v${APP_VERSION} · ${APP_PHASE}`;
@@ -29,6 +29,21 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version:  '0.4.1',
+    phase:    'Phase 3G',
+    date:     '2026-05-31',
+    summary:  'Audit Hardening',
+    highlights: [
+      'Native command result fields aligned across Rust and TypeScript',
+      'CLI timeout handling changed to owned child-process polling',
+      'Tauri CSP restored and SmartScreen bypass flag removed',
+      'Voice settings, personality prompt, and memory injection hardened',
+      'Auto-memory is off by default and controlled by voice settings',
+      'Mock-backed operator surfaces now show visible demo-data notices',
+      'Strict TypeScript, Rust fmt, and clippy gates are clean',
+    ],
+  },
   {
     version:  '0.3.2',
     phase:    'Phase 3C',

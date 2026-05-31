@@ -54,10 +54,10 @@ function unavailableResult(program: string, args: string[]): NativeCommandResult
   return {
     program,
     args,
-    exit_code: -1,
+    exitCode: -1,
     stdout: '',
     stderr: '',
-    duration_ms: 0,
+    durationMs: 0,
     allowed: false,
     error: 'Native bridge unavailable — not running in Tauri desktop mode',
   };
@@ -79,6 +79,7 @@ const KNOWN_ALLOWED_COMMANDS: NativeAllowedCommandEntry[] = [
   { program: 'npm', args: ['run', 'lint'], display_name: 'TypeScript lint check' },
   { program: 'npm', args: ['run', 'build'], display_name: 'Vite production build' },
   { program: 'npm', args: ['run', 'tauri:build'], display_name: 'Tauri production build' },
+  { program: 'cargo', args: ['test'], display_name: 'Rust unit tests' },
   { program: 'git', args: ['status', '--short'], display_name: 'Git status (short)' },
   { program: 'git', args: ['branch', '--show-current'], display_name: 'Show current branch' },
   { program: 'git', args: ['log', '--oneline', '-20'], display_name: 'Git log (last 20)' },
@@ -159,15 +160,15 @@ class NativeCommandService {
 
     try {
       const result = await invoke('run_allowed_command', { program, args });
-      return result as NativeCommandResult;
+      return normalizeCommandResult(result, program, args);
     } catch (e) {
       return {
         program,
         args,
-        exit_code: -1,
+        exitCode: -1,
         stdout: '',
         stderr: '',
-        duration_ms: 0,
+        durationMs: 0,
         allowed: false,
         error: `Invoke error: ${e instanceof Error ? e.message : String(e)}`,
       };
@@ -243,3 +244,21 @@ class NativeCommandService {
 }
 
 export const nativeCommandService = new NativeCommandService();
+
+function normalizeCommandResult(raw: unknown, fallbackProgram: string, fallbackArgs: string[]): NativeCommandResult {
+  const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const exitCode = value.exitCode ?? value.exit_code ?? -1;
+  const durationMs = value.durationMs ?? value.duration_ms ?? 0;
+
+  return {
+    program: typeof value.program === 'string' ? value.program : fallbackProgram,
+    args: Array.isArray(value.args) ? value.args.map(String) : fallbackArgs,
+    exitCode: typeof exitCode === 'number' ? exitCode : Number(exitCode) || -1,
+    stdout: typeof value.stdout === 'string' ? value.stdout : '',
+    stderr: typeof value.stderr === 'string' ? value.stderr : '',
+    durationMs: typeof durationMs === 'number' ? durationMs : Number(durationMs) || 0,
+    allowed: Boolean(value.allowed),
+    cwd: typeof value.cwd === 'string' ? value.cwd : undefined,
+    error: typeof value.error === 'string' ? value.error : null,
+  };
+}

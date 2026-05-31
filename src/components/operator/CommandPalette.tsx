@@ -4,22 +4,21 @@
  * Ctrl+K global command palette with navigation, actions, and system commands.
  */
 
-import React, { useEffect, useState, useMemo, Fragment } from 'react';
+import { useEffect, useState, useMemo, Fragment, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Search, Terminal, ArrowRight, X, Workflow, Settings,
+  Search, Terminal, Workflow, Settings,
   LayoutDashboard, FolderKanban, BrainCircuit, BringToFront,
   Bot, Mic, ShieldCheck, Network, MemoryStick, ChevronRight,
   Activity, Link2, Eye, Bell, Webhook
 } from 'lucide-react';
-import { cn } from '../../lib/utils';
 
 // ─── Command definitions ──────────────────────────────────────────────────────
 
 interface Command {
   id: string;
   group: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   title: string;
   description?: string;
   action?: 'navigate' | 'toggle' | 'info';

@@ -1,5 +1,6 @@
 import { mockConnectors } from '../store/mockData';
 import { Link2, Github, HardDrive, Edit2, Play, Square } from 'lucide-react';
+import { DataSourceNotice } from '../components/common/DataSourceNotice';
 
 export function Connectors() {
   return (
@@ -14,6 +15,8 @@ export function Connectors() {
           Add Connector
         </button>
       </div>
+
+      <DataSourceNotice detail="Connector cards and Start/Stop controls are demo state until MCP process management is wired to the desktop backend." />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {mockConnectors.map(conn => (

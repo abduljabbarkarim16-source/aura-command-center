@@ -12,7 +12,7 @@
  *  - cargo test added to command buttons
  */
 
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   Play, Trash2, Copy, CheckCircle, XCircle, Clock,

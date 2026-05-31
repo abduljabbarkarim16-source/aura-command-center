@@ -54,11 +54,6 @@ class SecureKeyService {
     return () => this.listeners.delete(fn);
   }
 
-  private notify() {
-    const snap = this.getSnapshot();
-    for (const fn of this.listeners) fn(snap);
-  }
-
   // ── Snapshot ──────────────────────────────────────────────────────────────
 
   getSnapshot(): SecureKeyServiceSnapshot {

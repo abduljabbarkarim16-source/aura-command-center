@@ -24,7 +24,7 @@ export function Layout() {
             <Outlet />
           </main>
           {/* Right operator panel — collapsible, wired to notification/transcript services */}
-          <div className="relative shrink-0 flex">
+          <div className="relative hidden shrink-0 xl:flex">
             <OperatorRightPanel width={260} defaultOpen={true} />
           </div>
         </div>

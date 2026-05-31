@@ -1,13 +1,14 @@
-/// AURA Config Commands
-///
-/// Handles persistent configuration for the installed app.
-/// API keys are written to %APPDATA%\com.aura.commandcenter\.env
-/// and hot-loaded into the running process so no restart is needed.
-///
-/// Security:
-/// - Keys are written to a user-only AppData directory (not system-wide)
-/// - Keys are never returned, logged, or sent to the frontend
-/// - The in-memory process env is updated so the change takes effect immediately
+//! AURA Config Commands
+//!
+//! Handles persistent configuration for the installed app.
+//! API keys are written to %APPDATA%\com.aura.commandcenter\.env
+//! and hot-loaded into the running process so no restart is needed.
+//!
+//! Security:
+//! - Keys are written to a user AppData directory (not system-wide)
+//! - Keys are never returned, logged, or sent back to the frontend
+//! - The in-memory process env is updated so the change takes effect immediately
+//! - This is local `.env` storage, not OS keychain or Tauri Stronghold storage
 
 use std::path::PathBuf;
 
@@ -35,15 +36,13 @@ pub fn save_openai_key(key: String) -> Result<(), String> {
     }
 
     let dir = config_dir()?;
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("Could not create config directory: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create config directory: {e}"))?;
 
     let env_path = dir.join(".env");
     let content = format!(
         "# AURA — saved by in-app settings\nVITE_OPENAI_API_KEY={key}\nOPENAI_API_KEY={key}\n"
     );
-    std::fs::write(&env_path, &content)
-        .map_err(|e| format!("Could not write config file: {e}"))?;
+    std::fs::write(&env_path, &content).map_err(|e| format!("Could not write config file: {e}"))?;
 
     // Hot-reload: update the current process environment so the key is
     // available to subsequent Tauri command calls without restarting.

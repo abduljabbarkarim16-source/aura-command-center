@@ -46,8 +46,12 @@ class OpenAIVoiceSessionServiceImpl {
 
   // ── Readiness check ───────────────────────────────────────────────────────
 
-  isReady(): boolean {
-    return Boolean(import.meta.env.VITE_OPENAI_API_KEY);
+  async isReady(): Promise<boolean> {
+    try {
+      return await invoke<boolean>('openai_key_is_configured');
+    } catch {
+      return Boolean(import.meta.env.VITE_OPENAI_API_KEY);
+    }
   }
 
   // ── STT: transcribe audio via Tauri backend ───────────────────────────────
@@ -137,9 +141,12 @@ class OpenAIVoiceSessionServiceImpl {
         userText: userText.trim(),
         auraText: auraText.trim(),
       });
-      const parsed = JSON.parse(raw) as Array<{ category: string; content: string }>;
+      const parsed = JSON.parse(raw) as
+        | Array<{ category: string; content: string }>
+        | { facts?: Array<{ category: string; content: string }> };
+      const facts = Array.isArray(parsed) ? parsed : (parsed.facts ?? []);
       return {
-        facts: parsed
+        facts: facts
           .filter(f => (f.category === 'personal' || f.category === 'task') && f.content?.trim())
           .map(f => ({ category: f.category as 'personal' | 'task', content: f.content.trim() })),
       };

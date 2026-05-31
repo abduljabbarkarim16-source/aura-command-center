@@ -12,13 +12,13 @@ import {
   Activity, CheckCircle2, Clock, AlertCircle,
   Bot, ChevronRight, ShieldCheck, Zap, MemoryStick,
   Terminal, Workflow, ArrowRight, Sparkles,
-  Cpu, GitBranch, Database,
 } from 'lucide-react';
 import { VERSION_DISPLAY } from '../lib/appVersion';
 import { mockAgents, mockTasks, mockProjects } from '../store/mockData';
 import { FuturePlaceholderCards } from '../components/operator/FuturePlaceholderCards';
 import { ProviderCapabilityCard } from '../components/operator/ProviderCapabilityCard';
 import { SelfBuildReadinessPanel } from '../components/operator/SelfBuildReadinessPanel';
+import { DataSourceNotice } from '../components/common/DataSourceNotice';
 import { cn } from '../lib/utils';
 
 // ─── Compact section header ───────────────────────────────────────────────────
@@ -61,7 +61,7 @@ export function Dashboard() {
     <div className="max-w-5xl mx-auto px-6 py-8 space-y-10">
 
       {/* ── Today / Operations header ───────────────────────────────── */}
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-[11px] font-semibold text-zinc-600 uppercase tracking-widest mb-1">{today}</p>
           <h1 className="text-2xl font-semibold tracking-tight text-white">Operations</h1>
@@ -74,12 +74,14 @@ export function Dashboard() {
         </div>
         <button
           onClick={() => navigate('/')}
-          className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[13px] font-semibold transition-all shadow-lg shadow-indigo-500/20 hover:-translate-y-0.5"
+          className="flex w-full items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[13px] font-semibold transition-all shadow-lg shadow-indigo-500/20 hover:-translate-y-0.5 sm:w-auto"
         >
           <Sparkles className="w-4 h-4" />
           Open Console
         </button>
       </div>
+
+      <DataSourceNotice detail="Operations, active mission, approvals, and agent fleet counts are currently assembled from seeded local data. Live provider readiness is shown in the provider and self-build panels below." />
 
       {/* ── Quick stat strip ────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

@@ -137,7 +137,7 @@ export const DEFAULT_PROVIDERS: Readonly<ProviderConfig[]> = [
     baseUrl: '',
     hasApiKey: false,
     keyStorageStatus: 'missing',
-    notes: 'API key stored in OS secure storage only — never in localStorage.',
+    notes: 'API key should be stored outside localStorage. Current desktop OpenAI key path uses local AppData .env until OS keychain is implemented.',
   },
   {
     id: 'provider-openai',
@@ -148,7 +148,7 @@ export const DEFAULT_PROVIDERS: Readonly<ProviderConfig[]> = [
     baseUrl: '',
     hasApiKey: false,
     keyStorageStatus: 'missing',
-    notes: 'API key stored in OS secure storage only — never in localStorage.',
+    notes: 'API key should be stored outside localStorage. Current desktop OpenAI key path uses local AppData .env until OS keychain is implemented.',
   },
   {
     id: 'provider-google',
@@ -159,7 +159,7 @@ export const DEFAULT_PROVIDERS: Readonly<ProviderConfig[]> = [
     baseUrl: '',
     hasApiKey: false,
     keyStorageStatus: 'missing',
-    notes: 'API key stored in OS secure storage only — never in localStorage.',
+    notes: 'API key should be stored outside localStorage. Current desktop OpenAI key path uses local AppData .env until OS keychain is implemented.',
   },
   {
     id: 'provider-ollama',

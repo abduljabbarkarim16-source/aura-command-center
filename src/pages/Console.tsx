@@ -9,7 +9,7 @@
  *   chatConsole  → Chat stream + composer (opened from Voice Core)
  */
 
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { mockMessages } from '../store/mockData';
 
 import { AuraVoiceCore }        from '../components/operator/AuraVoiceCore';

@@ -569,7 +569,7 @@ export function Settings() {
       <CollapsibleSection
         icon={<Cpu className="w-5 h-5" />}
         title="Provider Connections"
-        subtitle="API keys are never stored in localStorage — secure storage only"
+        subtitle="Provider toggles stay local. Current OpenAI key storage uses the local AppData .env file."
       >
         <div className="space-y-0 divide-y divide-zinc-800/50">
           {providers.map(p => (

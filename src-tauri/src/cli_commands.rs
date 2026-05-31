@@ -1,23 +1,22 @@
-/// AURA CLI Agent Runner — Controlled agent session execution
-///
-/// Allows AURA to spawn short, allowlisted CLI agent sessions (claude, codex).
-/// All sessions are strictly controlled:
-///   - Only allowlisted binaries may run
-///   - Prompts are length-limited and metacharacter-checked
-///   - Sessions are run non-interactively with a hard timeout (60s)
-///   - No API keys, no repo source, no secrets in prompts
-///   - stdout/stderr captured, not streamed to external services
-///   - Usage-limit detection: parse known patterns and return flag
-///
-/// Security invariants:
-///   - Binary allowlist is hardcoded in Rust
-///   - Prompt sanitised before execution
-///   - No shell invocation; direct process spawn
-///   - Timeout enforced with thread + kill
+//! AURA CLI Agent Runner — Controlled agent session execution
+//!
+//! Allows AURA to spawn short, allowlisted CLI agent sessions (claude, codex).
+//! All sessions are strictly controlled:
+//!   - Only allowlisted binaries may run
+//!   - Prompts are length-limited and metacharacter-checked
+//!   - Sessions are run non-interactively with a hard timeout (60s)
+//!   - No API keys, no repo source, no secrets in prompts
+//!   - stdout/stderr captured, not streamed to external services
+//!   - Usage-limit detection: parse known patterns and return flag
+//!
+//! Security invariants:
+//!   - Binary allowlist is hardcoded in Rust
+//!   - Prompt sanitised before execution
+//!   - No shell invocation; direct process spawn
+//!   - Timeout enforced by polling the child handle directly
 
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -57,7 +56,9 @@ const USAGE_LIMIT_PATTERNS: &[&str] = &[
 /// Check if output indicates a usage / quota limit.
 fn detect_usage_limit(text: &str) -> bool {
     let lower = text.to_lowercase();
-    USAGE_LIMIT_PATTERNS.iter().any(|p| lower.contains(&p.to_lowercase()))
+    USAGE_LIMIT_PATTERNS
+        .iter()
+        .any(|p| lower.contains(&p.to_lowercase()))
 }
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -65,38 +66,42 @@ fn detect_usage_limit(text: &str) -> bool {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSessionResult {
-    pub session_id:          String,
-    pub binary:              String,
-    pub success:             bool,
-    pub exit_code:           i32,
-    pub stdout:              String,
-    pub stderr:              String,
-    pub duration_ms:         u64,
-    pub timed_out:           bool,
+    pub session_id: String,
+    pub binary: String,
+    pub success: bool,
+    pub exit_code: i32,
+    pub stdout: String,
+    pub stderr: String,
+    pub duration_ms: u64,
+    pub timed_out: bool,
     pub usage_limit_detected: bool,
-    pub usage_limit_message:  Option<String>,
-    pub error:               Option<String>,
+    pub usage_limit_message: Option<String>,
+    pub error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CliHelpSummary {
-    pub binary:    String,
+    pub binary: String,
     pub available: bool,
     pub help_text: String,
-    pub path:      Option<String>,
+    pub path: Option<String>,
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 fn is_allowed_cli(binary: &str) -> bool {
     let lower = binary.to_lowercase();
-    CLI_ALLOWLIST.iter().any(|&b| b == lower.as_str())
+    CLI_ALLOWLIST.contains(&lower.as_str())
 }
 
 fn sanitise_prompt(prompt: &str) -> Result<String, String> {
     if prompt.len() > MAX_PROMPT_LEN {
-        return Err(format!("Prompt too long ({} chars, max {})", prompt.len(), MAX_PROMPT_LEN));
+        return Err(format!(
+            "Prompt too long ({} chars, max {})",
+            prompt.len(),
+            MAX_PROMPT_LEN
+        ));
     }
     if prompt.chars().any(|c| BLOCKED_CHARS.contains(&c)) {
         return Err("Prompt contains blocked characters".into());
@@ -116,27 +121,30 @@ fn sanitise_prompt(prompt: &str) -> Result<String, String> {
 /// No streaming — full output returned on completion.
 #[tauri::command]
 pub fn spawn_agent_session(
-    binary:    String,
-    prompt:    String,
+    binary: String,
+    prompt: String,
     session_id: String,
 ) -> AgentSessionResult {
     // ── Validation ────────────────────────────────────────────────────────
     let make_error = |msg: &str| AgentSessionResult {
         session_id: session_id.clone(),
-        binary:     binary.clone(),
-        success:    false,
-        exit_code:  -1,
-        stdout:     String::new(),
-        stderr:     String::new(),
+        binary: binary.clone(),
+        success: false,
+        exit_code: -1,
+        stdout: String::new(),
+        stderr: String::new(),
         duration_ms: 0,
-        timed_out:  false,
+        timed_out: false,
         usage_limit_detected: false,
         usage_limit_message: None,
         error: Some(msg.to_string()),
     };
 
     if !is_allowed_cli(&binary) {
-        return make_error(&format!("Binary '{}' is not in the AURA CLI allowlist", binary));
+        return make_error(&format!(
+            "Binary '{}' is not in the AURA CLI allowlist",
+            binary
+        ));
     }
 
     let clean_prompt = match sanitise_prompt(&prompt) {
@@ -163,13 +171,6 @@ pub fn spawn_agent_session(
 
     let start = Instant::now();
 
-    // ── Spawn with timeout ────────────────────────────────────────────────
-    //
-    // We use a thread + channel pattern:
-    //   - Main thread spawns the child
-    //   - Worker thread waits for output
-    //   - Main thread waits SESSION_TIMEOUT_SECS then kills if still running
-
     let timeout = Duration::from_secs(SESSION_TIMEOUT_SECS);
 
     let mut child = match Command::new(&binary)
@@ -184,28 +185,37 @@ pub fn spawn_agent_session(
         }
     };
 
-    // Use Arc<Mutex<bool>> to signal timeout kill
-    let timed_out_flag = Arc::new(Mutex::new(false));
-    let timed_out_clone = Arc::clone(&timed_out_flag);
-    let child_id = child.id();
-
-    // Spawn timeout watcher thread
-    let timeout_thread = std::thread::spawn(move || {
-        std::thread::sleep(timeout);
-        *timed_out_clone.lock().unwrap() = true;
-        // Kill the process by PID on timeout
-        #[cfg(target_os = "windows")]
-        { let _ = Command::new("taskkill").args(["/F", "/PID", &child_id.to_string()]).output(); }
-        #[cfg(not(target_os = "windows"))]
-        { let _ = Command::new("kill").args(["-9", &child_id.to_string()]).output(); }
-    });
+    let mut was_timed_out = false;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if start.elapsed() >= timeout => {
+                was_timed_out = true;
+                let _ = child.kill();
+                break;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(100)),
+            Err(e) => {
+                let duration_ms = start.elapsed().as_millis() as u64;
+                return AgentSessionResult {
+                    session_id,
+                    binary,
+                    success: false,
+                    exit_code: -1,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    duration_ms,
+                    timed_out: false,
+                    usage_limit_detected: false,
+                    usage_limit_message: None,
+                    error: Some(format!("Process wait error: {e}")),
+                };
+            }
+        }
+    }
 
     let output = child.wait_with_output();
-    // Attempt to drop the timeout thread (it may still be sleeping — that's OK)
-    drop(timeout_thread);
-
     let duration_ms = start.elapsed().as_millis() as u64;
-    let was_timed_out = *timed_out_flag.lock().unwrap();
 
     match output {
         Ok(out) => {
@@ -218,9 +228,13 @@ pub fn spawn_agent_session(
             let usage_detected = detect_usage_limit(&all_output);
             let usage_message = if usage_detected {
                 // Extract the first matching line
-                all_output.lines()
-                    .find(|l| USAGE_LIMIT_PATTERNS.iter()
-                        .any(|p| l.to_lowercase().contains(&p.to_lowercase())))
+                all_output
+                    .lines()
+                    .find(|l| {
+                        USAGE_LIMIT_PATTERNS
+                            .iter()
+                            .any(|p| l.to_lowercase().contains(&p.to_lowercase()))
+                    })
                     .map(|l| l.trim().to_string())
             } else {
                 None
@@ -262,20 +276,42 @@ pub fn spawn_agent_session(
 pub fn get_cli_help(binary: String) -> CliHelpSummary {
     if !is_allowed_cli(&binary) {
         return CliHelpSummary {
-            binary, available: false, help_text: String::new(), path: None,
+            binary,
+            available: false,
+            help_text: String::new(),
+            path: None,
         };
     }
 
     // Get path first
-    let check_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-    let path_opt = Command::new(check_cmd).arg(&binary).output().ok()
+    let check_cmd = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
+    let path_opt = Command::new(check_cmd)
+        .arg(&binary)
+        .output()
+        .ok()
         .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).lines().next().unwrap_or("").trim().to_string())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_string()
+        })
         .filter(|s| !s.is_empty());
 
     let available = path_opt.is_some();
     if !available {
-        return CliHelpSummary { binary, available: false, help_text: String::new(), path: None };
+        return CliHelpSummary {
+            binary,
+            available: false,
+            help_text: String::new(),
+            path: None,
+        };
     }
 
     let output = Command::new(&binary)
@@ -297,7 +333,12 @@ pub fn get_cli_help(binary: String) -> CliHelpSummary {
         Err(_) => String::new(),
     };
 
-    CliHelpSummary { binary, available: true, help_text, path: path_opt }
+    CliHelpSummary {
+        binary,
+        available: true,
+        help_text,
+        path: path_opt,
+    }
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────────
@@ -320,7 +361,7 @@ mod tests {
         assert!(sanitise_prompt("Hello, please help me").is_ok());
         assert!(sanitise_prompt(&"a".repeat(MAX_PROMPT_LEN + 1)).is_err());
         assert!(sanitise_prompt("exec `ls`").is_err()); // backtick blocked
-        assert!(sanitise_prompt("$HOME").is_err());     // $ blocked
+        assert!(sanitise_prompt("$HOME").is_err()); // $ blocked
     }
 
     #[test]

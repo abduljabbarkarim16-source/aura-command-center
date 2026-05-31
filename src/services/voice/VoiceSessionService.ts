@@ -49,8 +49,8 @@ class VoiceSessionServiceImpl {
 
   // ── Readiness snapshot ────────────────────────────────────────────────────
 
-  getReadinessSnapshot(): VoiceReadinessSnapshot {
-    const openaiKeyPresent = Boolean(import.meta.env.VITE_OPENAI_API_KEY);
+  getReadinessSnapshot(openaiKeyPresentOverride?: boolean): VoiceReadinessSnapshot {
+    const openaiKeyPresent = openaiKeyPresentOverride ?? Boolean(import.meta.env.VITE_OPENAI_API_KEY);
     const elevenLabsKeyPresent = Boolean(import.meta.env.VITE_ELEVENLABS_API_KEY);
 
     const sttProvider: VoiceSTTProvider = openaiKeyPresent ? 'openai-whisper' : 'browser-speech';

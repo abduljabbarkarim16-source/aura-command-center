@@ -9,7 +9,8 @@
  *  - Wake phrase toggle (experimental, with amber warning)
  *  - Response style selector (Brief / Normal / Detailed)
  */
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { Mic2, CheckCircle2, XCircle, AlertCircle, Lock, Radio, AlertTriangle } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { voiceSessionService } from '../../services/voice/VoiceSessionService';
@@ -28,8 +29,24 @@ export function VoiceReadinessCard() {
   });
 
   useEffect(() => {
-    const interval = setInterval(() => setSnap(voiceSessionService.getReadinessSnapshot()), 2000);
-    return () => clearInterval(interval);
+    let cancelled = false;
+    const refresh = async () => {
+      let savedOpenAIKey: boolean | undefined;
+      try {
+        savedOpenAIKey = await invoke<boolean>('openai_key_is_configured');
+      } catch {
+        savedOpenAIKey = undefined;
+      }
+      if (!cancelled) {
+        setSnap(voiceSessionService.getReadinessSnapshot(savedOpenAIKey));
+      }
+    };
+    refresh();
+    const interval = setInterval(refresh, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   function updateSettings(patch: Partial<VoiceConversationSettings>) {
@@ -46,7 +63,7 @@ export function VoiceReadinessCard() {
       status: snap.openaiKeyPresent ? 'ok' : 'missing',
       detail: snap.openaiKeyPresent
         ? 'Present — STT (Whisper) + Chat + TTS enabled via Tauri backend'
-        : 'Not configured — add VITE_OPENAI_API_KEY to .env',
+        : 'Not configured - save an OpenAI key in Settings or add VITE_OPENAI_API_KEY to .env',
     },
     {
       label: 'STT Provider',
@@ -192,6 +209,13 @@ export function VoiceReadinessCard() {
               { value: 'detailed', label: 'Detailed (up to 5 sentences)' },
             ]}
             onChange={v => updateSettings({ responseStyle: v })}
+          />
+
+          <ToggleRow
+            label="Auto-save memory"
+            detail="Extract and save long-term facts after voice turns. Off by default."
+            checked={settings.autoMemoryEnabled ?? false}
+            onChange={v => updateSettings({ autoMemoryEnabled: v })}
           />
 
           {/* Auto-stop on silence */}

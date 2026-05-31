@@ -16,7 +16,6 @@
  *   critical → rose
  */
 
-import React from 'react';
 import { X, Shield } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ApprovalCard, type ApprovalCardProps } from './ApprovalCard';

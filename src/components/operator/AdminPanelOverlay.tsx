@@ -19,6 +19,7 @@ import { useWorkspaceController } from '../../hooks/useWorkspaceController';
 import { BackgroundTasksPanel } from './BackgroundTasksPanel';
 import { AuraMemoryPanel } from './AuraMemoryPanel';
 import { AuraPersonalityPanel } from './AuraPersonalityPanel';
+import { DataSourceNotice } from '../common/DataSourceNotice';
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
 
@@ -167,6 +168,8 @@ export function AdminPanelOverlay({
         {/* Overview tab — scrollable body */}
         {activeTab === 'overview' && (
         <div className="flex-1 overflow-y-auto custom-scrollbar px-5 py-5 flex flex-col gap-6">
+
+          <DataSourceNotice detail="Overview projects, relay rows, handoffs, and health checks in this panel are mock status cards." />
 
           {/* ── Projects ──────────────────────────────────────────────── */}
           <section>

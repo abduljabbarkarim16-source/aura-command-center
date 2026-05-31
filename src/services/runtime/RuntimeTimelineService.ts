@@ -150,6 +150,11 @@ class RuntimeTimelineService {
     this.startListening();
   }
 
+  dispose(): void {
+    this.unsubscribeFromRuntime?.();
+    this.unsubscribeFromRuntime = null;
+  }
+
   // ── Subscription ──────────────────────────────────────────────────────────
 
   subscribe(fn: TimelineListener): () => void {

@@ -119,6 +119,7 @@ export interface VoiceConversationSettings {
   fastResponseMode?: boolean;  // generate 1-sentence reply first, then full, default false
   sentenceFirstTTS?: boolean;  // start TTS after first sentence, default true
   fastAcknowledgementEnabled?: boolean; // show instant visual ack when speech captured, default true
+  autoMemoryEnabled?: boolean; // auto-save extracted long-term memories after turns, default false
 }
 
 export const DEFAULT_VOICE_SETTINGS: VoiceConversationSettings = {
@@ -141,6 +142,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceConversationSettings = {
   fastResponseMode: false,
   sentenceFirstTTS: true,
   fastAcknowledgementEnabled: true,
+  autoMemoryEnabled: false,
 };
 
 // ─── Session ──────────────────────────────────────────────────────────────────

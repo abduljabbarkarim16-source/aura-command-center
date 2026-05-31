@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Settings2, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { DataSourceNotice } from '../common/DataSourceNotice';
 
 // Import the existing technical panels
 import { LocalhostPreviewPanel } from '../workspace/LocalhostPreviewPanel';
@@ -64,6 +65,8 @@ export function TechnicalDrawer({ isOpen, onClose }: TechnicalDrawerProps) {
             </button>
           ))}
         </div>
+
+        <DataSourceNotice detail="Several technical panels below use mock runtime, preview, usage, artifact, and command-queue data until their backend adapters are implemented." />
 
         {/* Tab Content Area */}
         <div className="flex-1 min-h-0 overflow-y-auto w-full pb-4 pr-1 space-y-4 no-scrollbar">

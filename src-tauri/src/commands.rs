@@ -1,15 +1,15 @@
-/// AURA Native Command Bridge — Controlled execution layer
-///
-/// This module provides a strict allowlist-based command execution bridge.
-/// Only pre-approved commands can run. All others are rejected.
-///
-/// Security invariants:
-/// - Allowlist is hardcoded in Rust — frontend cannot modify it
-/// - Shell metacharacters are rejected
-/// - Blocked executables are rejected even if somehow matched
-/// - No environment variable printing
-/// - No command chaining
-/// - stdout/stderr are captured and returned as structured data
+//! AURA Native Command Bridge — Controlled execution layer
+//!
+//! This module provides a strict allowlist-based command execution bridge.
+//! Only pre-approved commands can run. All others are rejected.
+//!
+//! Security invariants:
+//! - Allowlist is hardcoded in Rust — frontend cannot modify it
+//! - Shell metacharacters are rejected
+//! - Blocked executables are rejected even if somehow matched
+//! - No environment variable printing
+//! - No command chaining
+//! - stdout/stderr are captured and returned as structured data
 
 use serde::{Deserialize, Serialize};
 use std::process::Command;
@@ -66,12 +66,33 @@ const ALLOWED_COMMANDS: &[AllowedCommand] = &[
 /// Executables that are always rejected, even if an allowlist entry
 /// were somehow misconfigured to include them.
 const BLOCKED_EXECUTABLES: &[&str] = &[
-    "rm", "del", "rmdir", "Remove-Item",
-    "curl", "wget", "Invoke-WebRequest", "Invoke-RestMethod",
-    "powershell", "pwsh", "cmd", "sh", "bash", "zsh",
-    "npx", "node", "python", "python3", "pip", "pip3",
-    "format", "diskpart", "reg", "regedit",
-    "net", "netsh", "taskkill",
+    "rm",
+    "del",
+    "rmdir",
+    "Remove-Item",
+    "curl",
+    "wget",
+    "Invoke-WebRequest",
+    "Invoke-RestMethod",
+    "powershell",
+    "pwsh",
+    "cmd",
+    "sh",
+    "bash",
+    "zsh",
+    "npx",
+    "node",
+    "python",
+    "python3",
+    "pip",
+    "pip3",
+    "format",
+    "diskpart",
+    "reg",
+    "regedit",
+    "net",
+    "netsh",
+    "taskkill",
 ];
 
 /// Characters that indicate shell metacharacter injection.
@@ -121,7 +142,9 @@ pub struct AllowedCommandEntry {
 
 fn is_blocked_executable(program: &str) -> bool {
     let lower = program.to_lowercase();
-    BLOCKED_EXECUTABLES.iter().any(|b| b.to_lowercase() == lower)
+    BLOCKED_EXECUTABLES
+        .iter()
+        .any(|b| b.to_lowercase() == lower)
 }
 
 fn contains_metacharacters(s: &str) -> bool {
@@ -132,7 +155,11 @@ fn is_allowed_command(program: &str, args: &[String]) -> Option<&'static Allowed
     ALLOWED_COMMANDS.iter().find(|cmd| {
         cmd.program.eq_ignore_ascii_case(program)
             && cmd.args.len() == args.len()
-            && cmd.args.iter().zip(args.iter()).all(|(a, b)| *a == b.as_str())
+            && cmd
+                .args
+                .iter()
+                .zip(args.iter())
+                .all(|(a, b)| *a == b.as_str())
     })
 }
 
@@ -147,9 +174,14 @@ pub fn run_allowed_command(program: String, args: Vec<String>) -> CommandResult 
     // 1. Check for blocked executable
     if is_blocked_executable(&program) {
         return CommandResult {
-            program, args, exit_code: -1,
-            stdout: String::new(), stderr: String::new(),
-            duration_ms: 0, allowed: false, cwd: resolved_cwd,
+            program,
+            args,
+            exit_code: -1,
+            stdout: String::new(),
+            stderr: String::new(),
+            duration_ms: 0,
+            allowed: false,
+            cwd: resolved_cwd,
             error: Some("Blocked: this executable is not allowed".into()),
         };
     }
@@ -157,9 +189,14 @@ pub fn run_allowed_command(program: String, args: Vec<String>) -> CommandResult 
     // 2. Check for shell metacharacters in program and all args
     if contains_metacharacters(&program) || args.iter().any(|a| contains_metacharacters(a)) {
         return CommandResult {
-            program, args, exit_code: -1,
-            stdout: String::new(), stderr: String::new(),
-            duration_ms: 0, allowed: false, cwd: resolved_cwd,
+            program,
+            args,
+            exit_code: -1,
+            stdout: String::new(),
+            stderr: String::new(),
+            duration_ms: 0,
+            allowed: false,
+            cwd: resolved_cwd,
             error: Some("Blocked: shell metacharacters detected".into()),
         };
     }
@@ -168,9 +205,14 @@ pub fn run_allowed_command(program: String, args: Vec<String>) -> CommandResult 
     let allowed = is_allowed_command(&program, &args);
     if allowed.is_none() {
         return CommandResult {
-            program, args, exit_code: -1,
-            stdout: String::new(), stderr: String::new(),
-            duration_ms: 0, allowed: false, cwd: resolved_cwd,
+            program,
+            args,
+            exit_code: -1,
+            stdout: String::new(),
+            stderr: String::new(),
+            duration_ms: 0,
+            allowed: false,
+            cwd: resolved_cwd,
             error: Some("Rejected: command is not in the allowlist".into()),
         };
     }
@@ -240,9 +282,9 @@ pub fn get_workspace_info() -> WorkspaceInfo {
 #[tauri::command]
 pub fn check_command_available(program: String) -> CommandAvailability {
     // Only allow checking programs from the allowlist
-    let in_allowlist = ALLOWED_COMMANDS.iter().any(|cmd| {
-        cmd.program.eq_ignore_ascii_case(&program)
-    });
+    let in_allowlist = ALLOWED_COMMANDS
+        .iter()
+        .any(|cmd| cmd.program.eq_ignore_ascii_case(&program));
 
     if !in_allowlist {
         return CommandAvailability {
@@ -253,11 +295,13 @@ pub fn check_command_available(program: String) -> CommandAvailability {
     }
 
     // Use `where` on Windows, `which` on Unix
-    let check_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+    let check_cmd = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
 
-    let output = Command::new(check_cmd)
-        .arg(&program)
-        .output();
+    let output = Command::new(check_cmd).arg(&program).output();
 
     match output {
         Ok(output) if output.status.success() => {
@@ -312,16 +356,26 @@ pub fn check_cli_available(binary: String) -> CliAvailabilityResult {
     let lower = binary.to_lowercase();
 
     // Strict allowlist check — reject anything not explicitly permitted
-    if !AGENT_CLI_ALLOWLIST.iter().any(|&b| b == lower.as_str()) {
-        return CliAvailabilityResult { available: false, path: None };
+    if !AGENT_CLI_ALLOWLIST.contains(&lower.as_str()) {
+        return CliAvailabilityResult {
+            available: false,
+            path: None,
+        };
     }
 
     // Reject metacharacters (defensive — allowlist already covers this)
     if contains_metacharacters(&binary) {
-        return CliAvailabilityResult { available: false, path: None };
+        return CliAvailabilityResult {
+            available: false,
+            path: None,
+        };
     }
 
-    let check_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+    let check_cmd = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
     let output = Command::new(check_cmd).arg(&binary).output();
 
     match output {
@@ -337,7 +391,10 @@ pub fn check_cli_available(binary: String) -> CliAvailabilityResult {
                 path: if path.is_empty() { None } else { Some(path) },
             }
         }
-        _ => CliAvailabilityResult { available: false, path: None },
+        _ => CliAvailabilityResult {
+            available: false,
+            path: None,
+        },
     }
 }
 
@@ -447,9 +504,9 @@ pub fn get_workspace_path() -> WorkspaceStatus {
     let p = std::path::Path::new(&path);
     WorkspaceStatus {
         has_package_json: p.join("package.json").exists(),
-        has_git:          p.join(".git").exists(),
-        is_configured:    p.join("package.json").exists() && p.join(".git").exists(),
-        workspace_path:   path,
+        has_git: p.join(".git").exists(),
+        is_configured: p.join("package.json").exists() && p.join(".git").exists(),
+        workspace_path: path,
     }
 }
 
@@ -467,7 +524,9 @@ pub fn set_workspace_path(path: String) -> Result<String, String> {
         return Err(format!("Path does not exist: {path}"));
     }
     if !candidate.join("package.json").exists() {
-        return Err(format!("Not a valid project root (no package.json): {path}"));
+        return Err(format!(
+            "Not a valid project root (no package.json): {path}"
+        ));
     }
 
     // Write to AppData config
@@ -488,7 +547,10 @@ mod tests {
 
     #[test]
     fn test_allowed_command_success() {
-        let result = run_allowed_command("git".to_string(), vec!["status".to_string(), "--short".to_string()]);
+        let result = run_allowed_command(
+            "git".to_string(),
+            vec!["status".to_string(), "--short".to_string()],
+        );
         assert!(result.allowed, "git status --short should be allowed");
         assert_eq!(result.exit_code, 0, "git status --short should succeed");
         assert!(result.duration_ms > 0, "Duration should be recorded");
@@ -498,7 +560,10 @@ mod tests {
     fn test_unknown_command_rejected() {
         let result = run_allowed_command("echo".to_string(), vec!["hello".to_string()]);
         assert!(!result.allowed, "Unknown command should be rejected");
-        assert_eq!(result.error.unwrap(), "Rejected: command is not in the allowlist");
+        assert_eq!(
+            result.error.unwrap(),
+            "Rejected: command is not in the allowlist"
+        );
     }
 
     #[test]
@@ -507,23 +572,38 @@ mod tests {
         for cmd in blocked {
             let result = run_allowed_command(cmd.to_string(), vec!["something".to_string()]);
             assert!(!result.allowed, "{} should be blocked", cmd);
-            assert!(result.error.unwrap().contains("this executable is not allowed"));
+            assert!(result
+                .error
+                .unwrap()
+                .contains("this executable is not allowed"));
         }
     }
 
     #[test]
     fn test_git_reset_hard_rejected() {
         // 'git' is allowed but only for specific args.
-        let result = run_allowed_command("git".to_string(), vec!["reset".to_string(), "--hard".to_string()]);
+        let result = run_allowed_command(
+            "git".to_string(),
+            vec!["reset".to_string(), "--hard".to_string()],
+        );
         assert!(!result.allowed, "git reset --hard should be rejected");
-        assert_eq!(result.error.unwrap(), "Rejected: command is not in the allowlist");
+        assert_eq!(
+            result.error.unwrap(),
+            "Rejected: command is not in the allowlist"
+        );
     }
 
     #[test]
     fn test_metacharacters_rejected() {
         // Try to inject via an allowed command (though args wouldn't match anyway, metachar check comes first)
-        let result = run_allowed_command("git".to_string(), vec!["status".to_string(), ";".to_string(), "rm".to_string()]);
+        let result = run_allowed_command(
+            "git".to_string(),
+            vec!["status".to_string(), ";".to_string(), "rm".to_string()],
+        );
         assert!(!result.allowed, "Metacharacters should be rejected");
-        assert!(result.error.unwrap().contains("shell metacharacters detected"));
+        assert!(result
+            .error
+            .unwrap()
+            .contains("shell metacharacters detected"));
     }
 }

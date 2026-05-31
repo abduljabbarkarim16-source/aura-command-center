@@ -11,7 +11,7 @@
  *  - Sessions capped at 2 concurrent (enforced by CliSessionService + Rust)
  */
 
-import React, { Fragment, useState, useEffect, useCallback } from 'react';
+import { Fragment, useState, useEffect, useCallback } from 'react';
 import {
   Bot, CheckCircle2, XCircle, Clock, AlertTriangle,
   RefreshCw, Play, Copy, Trash2, ChevronDown, ChevronUp,
@@ -20,7 +20,6 @@ import {
 import { cn } from '../../lib/utils';
 import { cliDiscoveryService, type CliCapabilities } from '../../services/agents/CliDiscoveryService';
 import { cliSessionService } from '../../services/agents/CliSessionService';
-import { claudeCliService } from '../../services/agents/ClaudeCliService';
 import { reminderService } from '../../services/reminders/ReminderService';
 import { notificationService } from '../../services/notifications/NotificationService';
 import type { AgentSession } from '../../types/agent-session';

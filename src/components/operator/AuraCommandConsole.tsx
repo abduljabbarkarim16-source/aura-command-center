@@ -6,11 +6,12 @@
  * Replaces the over-sized consumer chat bubbles.
  */
 
-import React, { Fragment, useRef, useEffect } from 'react';
+import { Fragment, useRef, useEffect } from 'react';
 import { ArrowLeft, Settings2, LayoutGrid, Bot, Clock } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { AuraComposer } from './AuraComposer';
 import type { AuraMessage } from './AssistantMessage';
+import { DataSourceNotice } from '../common/DataSourceNotice';
 
 // ─── Message row ──────────────────────────────────────────────────────────────
 
@@ -182,6 +183,7 @@ export function AuraCommandConsole({ messages, onBack, onOpenAdmin, onOpenDetail
       {/* ── Message stream ── */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="max-w-2xl mx-auto w-full px-4 py-3 flex flex-col gap-2.5">
+          <DataSourceNotice detail="The console stream is currently seeded from local mock messages until live agent event persistence is connected." />
           <SessionDivider />
           {messages.map(msg => (
             <Fragment key={msg.id}>

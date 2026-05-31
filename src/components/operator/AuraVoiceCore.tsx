@@ -16,7 +16,7 @@
  * Security: API key never in this component.
  */
 
-import React, { useState, useEffect, useRef, useCallback, Fragment } from 'react';
+import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
 import {
   Mic, MicOff, Terminal, Settings2, LayoutGrid, Eye,
   Radio, Trash2, ChevronDown, ChevronUp, Bot, Database,
@@ -24,6 +24,7 @@ import {
   AlertTriangle, Moon, Pin,
 } from 'lucide-react';
 import { auraMemoryService } from '../../services/memory/AuraMemoryService';
+import { auraPersonalityService } from '../../services/personality/AuraPersonalityService';
 import { cn } from '../../lib/utils';
 import { AuraVoiceVisualizer } from './AuraVoiceVisualizer';
 import type { VisualizerState } from './AuraVoiceVisualizer';
@@ -71,19 +72,6 @@ const BADGE_RISK: Record<string, { bg: string; border: string; text: string }> =
   high:     { bg: 'bg-red-500/15',     border: 'border-red-500/30',     text: 'text-red-400'    },
   critical: { bg: 'bg-rose-500/15',    border: 'border-rose-500/30',    text: 'text-rose-400'   },
 };
-
-function runtimeStateLabel(state: VoiceRuntimeState): string {
-  switch (state) {
-    case 'listening':            return 'Listening';
-    case 'thinking':             return 'Thinking';
-    case 'speaking':             return 'Speaking';
-    case 'waiting_for_approval': return 'Awaiting';
-    case 'executing':            return 'Executing';
-    case 'error':                return 'Error';
-    case 'muted':                return 'Muted';
-    default:                     return 'Standby';
-  }
-}
 
 // ─── One-shot conversation phase (manual mode) ────────────────────────────────
 
@@ -186,14 +174,14 @@ export function AuraVoiceCore({
     try {
       const stored = localStorage.getItem('voice.conversation.settings');
       const parsed = stored ? (JSON.parse(stored) as Partial<VoiceConversationSettings>) : {};
-      return { ...DEFAULT_VOICE_SETTINGS, ...parsed, enabled: true };
-    } catch { return { ...DEFAULT_VOICE_SETTINGS, enabled: true }; }
+      return { ...DEFAULT_VOICE_SETTINGS, ...parsed };
+    } catch { return { ...DEFAULT_VOICE_SETTINGS }; }
   });
 
   // Conversation mode settings (extra — not in base VoiceConversationSettings yet)
   const [conversationModeEnabled, setConversationModeEnabled] = useState(false);
-  const [autoListen, setAutoListen] = useState(true);
-  const [dormancyMs, setDormancyMs] = useState(90_000); // 90s default
+  const [autoListen] = useState(true);
+  const [dormancyMs] = useState(90_000); // 90s default
 
   // ── Shared turn history ────────────────────────────────────────────────────
   const [turns, setTurns]         = useState<VoiceConversationTurn[]>([]);
@@ -205,6 +193,15 @@ export function AuraVoiceCore({
 
   const addTurn = useCallback((turn: VoiceConversationTurn) => {
     setTurns(prev => [...prev, turn].slice(-MAX_VISIBLE_TURNS));
+  }, []);
+
+  const extractMemoryIfEnabled = useCallback((userText: string, auraText: string) => {
+    if (!voiceSettingsRef.current.autoMemoryEnabled) return;
+    openAIVoiceSessionService.extractMemory(userText, auraText).then(result => {
+      if (result.facts.length > 0) {
+        auraMemoryService.addMany(result.facts, 'auto', userText.slice(0, 100));
+      }
+    });
   }, []);
 
   // ── Conversation loop (hands-free mode) ────────────────────────────────────
@@ -351,8 +348,10 @@ export function AuraVoiceCore({
     setLiveTranscriptOS({ user: sttResult.text, aura: '' });
     setOneShotPhase('thinking');
 
+    const style = voiceSettingsRef.current.responseStyle ?? 'normal';
+    const systemPrompt = auraPersonalityService.buildSystemPrompt({ responseStyle: style });
     const chatResult = await openAIVoiceSessionService.createChatResponse(
-      sttResult.text, voiceSettingsRef.current.responseStyle ?? 'normal',
+      sttResult.text, style, systemPrompt,
     );
     if (!chatResult.success || !chatResult.text) {
       notifyVoiceError(chatResult.error ?? 'AI response failed.');
@@ -366,6 +365,7 @@ export function AuraVoiceCore({
     addTurn(turn);
     setLiveTranscriptOS({ user: sttResult.text, aura: chatResult.text });
     voiceTranscriptLogService.logTurn({ userText: sttResult.text, auraText: chatResult.text, durationMs });
+    extractMemoryIfEnabled(sttResult.text, chatResult.text);
 
     const ttsResult = await openAIVoiceSessionService.synthesizeSpeech(chatResult.text, voiceSettingsRef.current.ttsVoice);
     if (!ttsResult.success || !ttsResult.audioBlobUrl) {
@@ -384,7 +384,7 @@ export function AuraVoiceCore({
     audio.onerror = () => { setOneShotPhase('idle'); runningRef.current = false; };
     audio.play().catch(() => { setOneShotPhase('idle'); runningRef.current = false; });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentAudioUrl, addTurn]);
+  }, [currentAudioUrl, addTurn, extractMemoryIfEnabled]);
 
   // ── One-shot handlers ──────────────────────────────────────────────────────
   const handleOneShotStart = useCallback(async () => {
@@ -427,8 +427,10 @@ export function AuraVoiceCore({
       runningRef.current = true;
       setLiveTranscriptOS({ user: transcript, aura: '' });
       setOneShotPhase('thinking');
+      const style = voiceSettingsRef.current.responseStyle ?? 'normal';
+      const systemPrompt = auraPersonalityService.buildSystemPrompt({ responseStyle: style });
       const chatResult = await openAIVoiceSessionService.createChatResponse(
-        transcript, voiceSettingsRef.current.responseStyle ?? 'normal',
+        transcript, style, systemPrompt,
       );
       if (!chatResult.success || !chatResult.text) {
         notifyVoiceError(chatResult.error ?? 'AI response failed.');
@@ -441,6 +443,7 @@ export function AuraVoiceCore({
       addTurn(turn);
       setLiveTranscriptOS({ user: transcript, aura: chatResult.text });
       voiceTranscriptLogService.logTurn({ userText: transcript, auraText: chatResult.text, durationMs: elapsed, chatLatencyMs: chatResult.latencyMs });
+      extractMemoryIfEnabled(transcript, chatResult.text);
       const ttsResult = await openAIVoiceSessionService.synthesizeSpeech(chatResult.text, voiceSettingsRef.current.ttsVoice);
       if (!ttsResult.success || !ttsResult.audioBlobUrl) { setOneShotPhase('idle'); runningRef.current = false; return; }
       if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
@@ -458,7 +461,7 @@ export function AuraVoiceCore({
       await processOneShotBlob(blob, elapsed);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [oneShotPhase, segmentedOneShot, manualRecorder, processOneShotBlob, currentAudioUrl, voiceSettings.autoStopEnabled, addTurn]);
+  }, [oneShotPhase, segmentedOneShot, manualRecorder, processOneShotBlob, currentAudioUrl, voiceSettings.autoStopEnabled, addTurn, extractMemoryIfEnabled]);
 
   // VAD auto-stop for one-shot (segmented session fires onAutoStop)
   useEffect(() => {
@@ -899,23 +902,23 @@ export function AuraVoiceCore({
                     </button>
                   ) : (
                     <button onClick={handleOneShotStart}
-                      disabled={(oneShotPhase !== 'idle' && oneShotPhase !== 'speaking') || micDenied || micUnsupported}
+                      disabled={oneShotPhase !== 'idle' || micDenied || micUnsupported}
                       className={cn('flex items-center gap-2 px-6 py-2.5 rounded-2xl font-semibold text-[14px] shadow-lg transition-all',
-                        ((oneShotPhase !== 'idle' && oneShotPhase !== 'speaking') || micDenied || micUnsupported)
+                        (oneShotPhase !== 'idle' || micDenied || micUnsupported)
                           ? 'bg-indigo-600/40 text-white/50 cursor-not-allowed'
                           : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/25')}>
                       <Mic className="w-4 h-4" />
-                      {oneShotPhase !== 'idle' && oneShotPhase !== 'speaking' ? oneShotPhaseLabel(oneShotPhase) : 'Speak'}
+                      {oneShotPhase !== 'idle' ? oneShotPhaseLabel(oneShotPhase) : 'Speak'}
                     </button>
                   )
                 )
               ) : (
-                <button onClick={() => { if (runtime.state === 'listening') runtime.stopListening(); else runtime.startListening(); }}
-                  disabled={runtime.isMuted}
-                  className={cn('flex items-center gap-2 px-6 py-2.5 rounded-2xl font-semibold text-[14px] transition-all shadow-lg',
-                    runtime.isMuted && 'opacity-40 cursor-not-allowed',
-                    runtime.state === 'listening' ? 'bg-rose-500 text-white shadow-rose-500/30' : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-500/25')}>
-                  <Mic className="w-4 h-4" />{runtime.state === 'listening' ? 'Stop' : 'Speak'}
+                <button
+                  disabled
+                  title="Enable voice conversation in Settings before using Speak."
+                  className="flex items-center gap-2 px-6 py-2.5 rounded-2xl font-semibold text-[14px] transition-all shadow-lg bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                >
+                  <MicOff className="w-4 h-4" /> Voice Off
                 </button>
               )}
 

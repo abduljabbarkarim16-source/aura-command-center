@@ -26,7 +26,6 @@ import type {
   SelfBuildRunStatus,
 } from '../../types/self-build';
 import type { CommandRiskClass } from '../../types/command-policy';
-import { commandPolicyService } from '../commands/CommandPolicyService';
 import { gitAutomationService } from '../git/GitAutomationService';
 import { agentRouter } from '../router/AgentRouterService';
 import { notificationService } from '../notifications/NotificationService';
@@ -480,8 +479,12 @@ class SelfBuildOrchestratorService {
     if (hasCritical) return 'critical';
     const hasHigh = milestones.some(m => m.tasks.some(t => t.riskClass === 'high'));
     if (hasHigh) return 'high';
+    const hasHighImpactRisk = risks.some(r => r.impact === 'high' && r.likelihood !== 'low');
+    if (hasHighImpactRisk) return 'high';
     const hasModerate = milestones.some(m => m.tasks.some(t => t.riskClass === 'moderate'));
     if (hasModerate) return 'moderate';
+    const hasModerateRisk = risks.some(r => r.impact === 'medium' || r.likelihood === 'high');
+    if (hasModerateRisk) return 'moderate';
     return 'safe';
   }
 }

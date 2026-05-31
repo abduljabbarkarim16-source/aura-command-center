@@ -5,7 +5,7 @@
  * Data loads from persistence (Phase 2B) with a mock seed fallback.
  */
 
-import React, { useEffect, useState, Fragment } from 'react';
+import { useEffect, useState, Fragment } from 'react';
 import { RefreshCw, Search, Plus } from 'lucide-react';
 import { mockProjects, mockAgents } from '../store/mockData';
 import { settingsService } from '../services/settings/SettingsService';
@@ -16,6 +16,7 @@ import {
   type ProjectMission,
   type ProjectStatus,
 } from '../components/operator/ProjectMissionCard';
+import { DataSourceNotice } from '../components/common/DataSourceNotice';
 
 // ─── Seed conversion ──────────────────────────────────────────────────────────
 
@@ -134,6 +135,8 @@ export function Projects() {
           </button>
         </div>
       </div>
+
+      <DataSourceNotice detail="Project records are persisted locally, but progress, active agent, next action, and approvals are still derived from seeded demo metadata." />
 
       {/* ── Search + filters ────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">

@@ -107,7 +107,7 @@ export function Handoffs() {
           </div>
         )}
 
-        {mockHandoffs.map(ho => (
+        {realHandoffs.length === 0 && mockHandoffs.map(ho => (
           <div key={ho.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 opacity-60">
             <div className="flex items-center gap-4 mb-6 pb-6 border-b border-zinc-800/50 font-mono text-sm">
               <div className="bg-zinc-950 border border-zinc-800 px-3 py-1.5 rounded-md text-indigo-400">

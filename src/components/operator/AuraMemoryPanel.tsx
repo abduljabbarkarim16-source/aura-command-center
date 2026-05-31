@@ -5,7 +5,7 @@
  * Both personal and task memories displayed with source badges.
  */
 
-import React, { Fragment, useState, useEffect } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import {
   Brain, Pin, Trash2, Edit3, Check, X, User, Briefcase,
   Sparkles, RefreshCw, PlusCircle,

@@ -1,4 +1,3 @@
-import { WorkspaceRunner } from '../../types/workspace';
 import { mockWorkspaceRunner } from '../../mock/workspaces';
 
 class LocalhostPreviewService {

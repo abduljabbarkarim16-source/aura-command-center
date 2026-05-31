@@ -5,12 +5,11 @@
  * Preset selector + free-text override + name settings.
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Sparkles, Check } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { auraPersonalityService } from '../../services/personality/AuraPersonalityService';
 import type { PersonalityConfig, PersonalityPreset } from '../../types/aura-personality';
-import { PRESET_DESCRIPTIONS } from '../../types/aura-personality';
 
 const PRESET_LABELS: Record<PersonalityPreset, { label: string; emoji: string; hint: string }> = {
   direct:    { label: 'Direct',    emoji: '⚡', hint: 'Minimal words, straight to it' },

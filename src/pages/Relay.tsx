@@ -5,7 +5,6 @@
  * Full form hidden under Advanced Edit.
  */
 
-import React from 'react';
 import { Workflow, ShieldAlert } from 'lucide-react';
 import { ReasoningRelayPanel } from '../components/relay/ReasoningRelayPanel';
 

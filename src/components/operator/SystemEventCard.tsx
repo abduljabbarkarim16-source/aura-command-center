@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   Activity, AlertTriangle, CheckCircle2, Info, Loader2,
   ChevronDown, ChevronUp, BrainCircuit, GitBranch,
-  ShieldCheck, Zap, Terminal, MemoryStick
+  ShieldCheck, Zap, MemoryStick
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -31,7 +31,7 @@ interface SystemEventCardProps {
 }
 
 const eventConfig: Record<SystemEventType, {
-  icon: React.ReactNode;
+  icon: ReactNode;
   labelColor: string;
   dotColor: string;
   label: string;

@@ -12,7 +12,7 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
-import type { MicPermission, VoiceRecordingState } from '../types/voice-session';
+import type { VoiceRecordingState } from '../types/voice-session';
 
 export interface UseVoiceRecorderReturn {
   state: VoiceRecordingState;

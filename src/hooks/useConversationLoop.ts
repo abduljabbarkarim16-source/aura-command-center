@@ -160,6 +160,15 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     }
   }, []);
 
+  const extractMemoryIfEnabled = useCallback((userText: string, auraText: string) => {
+    if (!settingsRef.current.autoMemoryEnabled) return;
+    openAIVoiceSessionService.extractMemory(userText, auraText).then(result => {
+      if (result.facts.length > 0) {
+        auraMemoryService.addMany(result.facts, 'auto', userText.slice(0, 100));
+      }
+    });
+  }, []);
+
   // ── Barge-in: start lightweight analyser while TTS plays ─────────────────
 
   const startBargeInAnalyser = useCallback(async () => {
@@ -383,12 +392,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
           };
           onTurnRef.current(turn);
           voiceTranscriptLogService.logTurn({ userText: transcript, auraText: fullText, durationMs: elapsed });
-          // Async memory extraction — never blocks voice response
-          openAIVoiceSessionService.extractMemory(transcript, fullText).then(result => {
-            if (result.facts.length > 0) {
-              auraMemoryService.addMany(result.facts, 'auto', transcript.slice(0, 100));
-            }
-          });
+          extractMemoryIfEnabled(transcript, fullText);
           return;
         }
       }
@@ -492,12 +496,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
           };
           onTurnRef.current(turn);
           voiceTranscriptLogService.logTurn({ userText: transcript, auraText: chatResult.text, durationMs: elapsed });
-          // Async memory extraction
-          openAIVoiceSessionService.extractMemory(transcript, chatResult.text).then(result => {
-            if (result.facts.length > 0) {
-              auraMemoryService.addMany(result.facts, 'auto', transcript.slice(0, 100));
-            }
-          });
+          extractMemoryIfEnabled(transcript, chatResult.text);
           return;
         }
       }
@@ -522,12 +521,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
       userText: transcript, auraText: chatResult.text,
       durationMs: elapsed, chatLatencyMs: chatResult.latencyMs, ttsLatencyMs: ttsResult.latencyMs,
     });
-    // Async memory extraction — fire and forget
-    openAIVoiceSessionService.extractMemory(transcript, chatResult.text).then(result => {
-      if (result.facts.length > 0) {
-        auraMemoryService.addMany(result.facts, 'auto', transcript.slice(0, 100));
-      }
-    });
+    extractMemoryIfEnabled(transcript, chatResult.text);
 
     if (!ttsResult.success || !ttsResult.audioBlobUrl) {
       runningRef.current = false;
@@ -636,7 +630,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     category: 'personal' | 'task' = 'task',
   ) => {
     if (!userText.trim() && !auraText.trim()) return;
-    const content = auraText.trim() || userText.trim();
+    const content = userText.trim() || auraText.trim();
     auraMemoryService.add({ category, source: 'explicit', content, context: userText.slice(0, 100) });
   }, []);
 

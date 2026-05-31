@@ -1,7 +1,6 @@
 import { Copy, CheckCircle2, ShieldCheck, XCircle, Send } from 'lucide-react';
 import { useState } from 'react';
 import type { RelayPacket } from '../../types/relay';
-import { relayService } from '../../services/relay/RelayService';
 
 interface Props {
   packet: RelayPacket;

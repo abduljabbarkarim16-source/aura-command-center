@@ -18,7 +18,6 @@
  *   source         — speaker accent: 'aura'|'admin'|'system'
  */
 
-import React from 'react';
 import { cn } from '../../lib/utils';
 import { useMockAudioReactivity } from '../../hooks/useMockAudioReactivity';
 

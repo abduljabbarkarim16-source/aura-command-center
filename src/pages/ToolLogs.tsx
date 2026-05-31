@@ -1,5 +1,6 @@
 import { mockMessages } from '../store/mockData';
 import { Terminal, CheckCircle2, XCircle } from 'lucide-react';
+import { DataSourceNotice } from '../components/common/DataSourceNotice';
 
 export function ToolLogs() {
   const toolCalls = mockMessages.flatMap(m => m.toolCalls || []).map((tc, idx) => ({ ...tc, idx }));
@@ -10,6 +11,8 @@ export function ToolLogs() {
         <h1 className="text-2xl font-semibold tracking-tight text-white mb-1">Tool Execution Logs</h1>
         <p className="text-zinc-400 text-sm">Audit trail of all actions performed by agents</p>
       </div>
+
+      <DataSourceNotice detail="This view is populated from seeded message history, not a persisted command execution log yet." />
 
       <div className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex flex-col">
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
