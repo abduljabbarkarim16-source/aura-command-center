@@ -3,7 +3,7 @@ import { Agent, Project, MemoryEntry, Handoff, McpConnector, Task, Message } fro
 export const mockAgents: Agent[] = [
   {
     id: 'agent-codex',
-    name: 'Codex Dev',
+    name: 'Codex CLI',
     provider: 'openai',
     model: 'gpt-4o',
     role: 'Full-stack Developer',
@@ -26,7 +26,7 @@ export const mockAgents: Agent[] = [
   },
   {
     id: 'agent-claude',
-    name: 'Claude Architect',
+    name: 'AURA',
     provider: 'anthropic',
     model: 'claude-3-5-sonnet',
     role: 'System Architect',
