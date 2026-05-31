@@ -249,6 +249,20 @@ class OpenAIVoiceSessionServiceImpl {
     return this.history.length / 2;
   }
 
+  /** Get the last N history messages (for tool dispatch service) */
+  getHistorySlice(n: number): Array<{ role: string; content: string }> {
+    return this.history.slice(-n);
+  }
+
+  /** Manually push a turn to history (used when bypassing createChatResponse) */
+  pushHistory(userText: string, auraText: string) {
+    this.history.push({ role: 'user', content: userText.trim() });
+    this.history.push({ role: 'assistant', content: auraText.trim() });
+    if (this.history.length > MAX_HISTORY_TURNS * 2) {
+      this.history = this.history.slice(-MAX_HISTORY_TURNS * 2);
+    }
+  }
+
   // ── Realtime stub (future) ────────────────────────────────────────────────
 
   async createRealtimeSession(

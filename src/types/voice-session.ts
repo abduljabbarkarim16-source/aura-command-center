@@ -120,6 +120,8 @@ export interface VoiceConversationSettings {
   sentenceFirstTTS?: boolean;  // start TTS after first sentence, default true
   fastAcknowledgementEnabled?: boolean; // show instant visual ack when speech captured, default true
   autoMemoryEnabled?: boolean; // auto-save extracted long-term memories after turns, default false
+  // Phase 3H — tool dispatch
+  toolDispatchEnabled?: boolean; // AURA calls approved tools autonomously, default true
 }
 
 export const DEFAULT_VOICE_SETTINGS: VoiceConversationSettings = {
@@ -143,6 +145,8 @@ export const DEFAULT_VOICE_SETTINGS: VoiceConversationSettings = {
   sentenceFirstTTS: true,
   fastAcknowledgementEnabled: true,
   autoMemoryEnabled: false,
+  // Phase 3H
+  toolDispatchEnabled: true,
 };
 
 // ─── Session ──────────────────────────────────────────────────────────────────

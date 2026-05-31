@@ -93,6 +93,8 @@ pub fn run() {
             voice_commands::openai_transcribe_audio,
             voice_commands::openai_chat_response,
             voice_commands::openai_fast_chat_response,
+            voice_commands::openai_chat_with_tools,
+            voice_commands::openai_chat_tool_result,
             voice_commands::openai_extract_memory,
             voice_commands::openai_synthesize_speech,
             cli_commands::spawn_agent_session,

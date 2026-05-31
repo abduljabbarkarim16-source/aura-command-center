@@ -213,8 +213,9 @@ export function AuraVoiceCore({
     stopPhrases: ['stop listening', 'pause conversation', "that's all", 'go idle', 'stop aura'],
     onTurnComplete: addTurn,
     onPhaseChange: (phase) => setLoopPhaseLabel(loopPhaseLabel(phase)),
-    fastResponseMode: voiceSettings.fastResponseMode ?? false,
-    sentenceFirstTTS: voiceSettings.sentenceFirstTTS ?? true,
+    fastResponseMode:    voiceSettings.fastResponseMode ?? false,
+    sentenceFirstTTS:    voiceSettings.sentenceFirstTTS ?? true,
+    toolDispatchEnabled: voiceSettings.toolDispatchEnabled ?? true,
   });
 
   // ── One-shot manual mode ───────────────────────────────────────────────────
