@@ -135,6 +135,92 @@ export const TOOL_CATALOG: ToolDefinition[] = [
     blockedInputPatterns: ['`', '$', '\\', '|', '&', ';'],
     timeoutMs: 60_000,
   },
+  // ── Memory tools (JS-native, local only) ───────────────────────────────
+  {
+    id: 'memory.rememberFact',
+    name: 'Remember a fact',
+    description: "Save a durable fact (e.g. a preference or project detail) to AURA's local memory. Use category 'personal' for facts about the user, 'task' for project/work facts.",
+    category: 'memory', risk: 'low', requiresApproval: false,
+    allowedInputKeys: ['content', 'category'], blockedInputPatterns: [], timeoutMs: 5_000,
+  },
+  {
+    id: 'memory.setUserName',
+    name: "Set the user's name",
+    description: "Remember the user's name (or preferred name). Call this when the user tells you their name.",
+    category: 'memory', risk: 'low', requiresApproval: false,
+    allowedInputKeys: ['name'], blockedInputPatterns: [], timeoutMs: 5_000,
+  },
+  {
+    id: 'memory.updatePreference',
+    name: 'Update a preference',
+    description: 'Record a UI or behaviour preference as a key/value pair.',
+    category: 'memory', risk: 'low', requiresApproval: false,
+    allowedInputKeys: ['key', 'value'], blockedInputPatterns: [], timeoutMs: 5_000,
+  },
+  {
+    id: 'memory.getUserProfile',
+    name: 'Get user profile',
+    description: "Recall what AURA knows about the user (name, preferences). Use this to answer questions like 'what is my name?'.",
+    category: 'memory', risk: 'low', requiresApproval: false,
+    allowedInputKeys: [], blockedInputPatterns: [], timeoutMs: 5_000,
+  },
+  {
+    id: 'memory.getCapabilityStatus',
+    name: 'Get capability status',
+    description: 'Recall the last-known summary of what AURA can and cannot do.',
+    category: 'memory', risk: 'low', requiresApproval: false,
+    allowedInputKeys: [], blockedInputPatterns: [], timeoutMs: 5_000,
+  },
+  {
+    id: 'memory.summarizeThread',
+    name: 'Summarize current thread',
+    description: 'Describe the current conversation thread (id, message count, summary).',
+    category: 'memory', risk: 'low', requiresApproval: false,
+    allowedInputKeys: [], blockedInputPatterns: [], timeoutMs: 5_000,
+  },
+  {
+    id: 'memory.compactThread',
+    name: 'Compact current thread',
+    description: 'Fold the current thread into a compact summary to save context.',
+    category: 'memory', risk: 'low', requiresApproval: false,
+    allowedInputKeys: [], blockedInputPatterns: [], timeoutMs: 5_000,
+  },
+  {
+    id: 'memory.deleteMemoryItem',
+    name: 'Delete a memory item',
+    description: 'Delete a saved memory by id (requires approval).',
+    category: 'memory', risk: 'medium', requiresApproval: true,
+    allowedInputKeys: ['id'], blockedInputPatterns: [], timeoutMs: 5_000,
+  },
+  // ── Capability tools (JS-native, read/test) ────────────────────────────
+  {
+    id: 'capabilities.can',
+    name: 'Can I do this?',
+    description: "Answer whether AURA can do a given capability (e.g. 'terminal.gitStatus', 'memory.userProfile').",
+    category: 'capability', risk: 'low', requiresApproval: false,
+    allowedInputKeys: ['capabilityId'], blockedInputPatterns: [], timeoutMs: 5_000,
+  },
+  {
+    id: 'capabilities.whyNot',
+    name: 'Why can\'t I do this?',
+    description: 'Explain what is missing for a capability that is not available.',
+    category: 'capability', risk: 'low', requiresApproval: false,
+    allowedInputKeys: ['capabilityId'], blockedInputPatterns: [], timeoutMs: 5_000,
+  },
+  {
+    id: 'capabilities.test',
+    name: 'Test a capability',
+    description: 'Run the real test for a capability and report whether it passed.',
+    category: 'capability', risk: 'low', requiresApproval: false,
+    allowedInputKeys: ['capabilityId'], blockedInputPatterns: [], timeoutMs: 60_000,
+  },
+  {
+    id: 'capabilities.gapReport',
+    name: 'Capability gap report',
+    description: "Produce an honest report of what AURA can't do yet and what it would take.",
+    category: 'capability', risk: 'low', requiresApproval: false,
+    allowedInputKeys: [], blockedInputPatterns: [], timeoutMs: 5_000,
+  },
 ];
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -289,7 +375,97 @@ class ToolRegistryServiceImpl {
       return { output, exitCode: session?.exitCode ?? -1, durationMs: Date.now() - start };
     }
 
+    // ── Memory + capability tools (JS-native, no Rust) ──────────────────
+    if (tool.category === 'memory' || tool.category === 'capability') {
+      return this.runNativeTool(tool.id, inputs, start);
+    }
+
     throw new Error(`No executor for tool: ${tool.id}`);
+  }
+
+  /**
+   * Execute JS-native tools (memory.*, capabilities.*).
+   * Uses lazy dynamic imports to avoid a module-load cycle with
+   * CapabilityRegistryService (which imports this registry).
+   */
+  private async runNativeTool(
+    toolId: string,
+    inputs: Record<string, string>,
+    start: number,
+  ): Promise<{ output: string; exitCode: number; durationMs: number }> {
+    const done = (output: string, exitCode = 0) => ({ output, exitCode, durationMs: Date.now() - start });
+
+    switch (toolId) {
+      case 'memory.rememberFact': {
+        const { auraMemoryService } = await import('../memory/AuraMemoryService');
+        const content = inputs['content'] ?? '';
+        const category = inputs['category'] === 'personal' ? 'personal' : 'task';
+        if (!content.trim()) return done('Nothing to remember — no content given.', 1);
+        auraMemoryService.add({ category, source: 'explicit', content });
+        return done(`Saved to memory (${category}): "${content.trim().slice(0, 120)}"`);
+      }
+      case 'memory.setUserName': {
+        const { userProfileMemoryService } = await import('../memory/UserProfileMemoryService');
+        const name = (inputs['name'] ?? '').trim();
+        if (!name) return done('No name provided.', 1);
+        userProfileMemoryService.setName(name);
+        return done(`Got it — I'll remember your name is ${name}.`);
+      }
+      case 'memory.updatePreference': {
+        const { userProfileMemoryService } = await import('../memory/UserProfileMemoryService');
+        const key = (inputs['key'] ?? '').trim();
+        const value = (inputs['value'] ?? '').trim();
+        if (!key) return done('No preference key provided.', 1);
+        userProfileMemoryService.setUiPreference(key, value);
+        return done(`Preference saved: ${key} = ${value}`);
+      }
+      case 'memory.getUserProfile': {
+        const { userProfileMemoryService } = await import('../memory/UserProfileMemoryService');
+        return done(userProfileMemoryService.summary());
+      }
+      case 'memory.getCapabilityStatus': {
+        const { capabilityMemoryService } = await import('../memory/CapabilityMemoryService');
+        const { capabilityGapService } = await import('../capabilities/CapabilityGapService');
+        return done(`${capabilityMemoryService.summary()} ${capabilityGapService.report().text}`);
+      }
+      case 'memory.summarizeThread': {
+        const { sessionThreadService } = await import('../session/SessionThreadService');
+        const d = sessionThreadService.describe();
+        return done(d?.text ?? 'No active conversation thread yet.');
+      }
+      case 'memory.compactThread': {
+        const { sessionThreadService } = await import('../session/SessionThreadService');
+        const t = sessionThreadService.compact();
+        const d = sessionThreadService.describe();
+        return done(t ? `Compacted. ${d?.text ?? ''}`.trim() : 'No active thread to compact.');
+      }
+      case 'memory.deleteMemoryItem': {
+        const { auraMemoryService } = await import('../memory/AuraMemoryService');
+        const id = (inputs['id'] ?? '').trim();
+        if (!id) return done('No memory id provided.', 1);
+        auraMemoryService.delete(id);
+        return done(`Deleted memory ${id}.`);
+      }
+      case 'capabilities.can': {
+        const { capabilityRegistryService } = await import('../capabilities/CapabilityRegistryService');
+        return done(capabilityRegistryService.can(inputs['capabilityId'] ?? '').reason);
+      }
+      case 'capabilities.whyNot': {
+        const { capabilityRegistryService } = await import('../capabilities/CapabilityRegistryService');
+        return done(capabilityRegistryService.whyNot(inputs['capabilityId'] ?? ''));
+      }
+      case 'capabilities.test': {
+        const { capabilityRegistryService } = await import('../capabilities/CapabilityRegistryService');
+        const r = await capabilityRegistryService.test(inputs['capabilityId'] ?? '');
+        return done(`${r.ok ? 'PASS' : 'FAIL'} (${r.status}): ${r.detail}`, r.ok ? 0 : 1);
+      }
+      case 'capabilities.gapReport': {
+        const { capabilityGapService } = await import('../capabilities/CapabilityGapService');
+        return done(capabilityGapService.report().text);
+      }
+      default:
+        throw new Error(`No native executor for tool: ${toolId}`);
+    }
   }
 }
 

@@ -34,7 +34,17 @@ const TOOL_AWARENESS =
   '- terminal__cargoTest: run Rust tests\n' +
   '- cli__claudeCheck: check if Claude CLI is available\n' +
   '- cli__codexCheck: check if Codex CLI is available\n' +
+  '- memory__setUserName: remember the user\'s name when they tell you\n' +
+  '- memory__rememberFact: save a durable fact (preference / project detail)\n' +
+  '- memory__getUserProfile: recall the user\'s name/preferences (use for "what is my name?")\n' +
+  '- memory__getCapabilityStatus: recall what you can and cannot do\n' +
+  '- memory__summarizeThread: describe the current conversation thread\n' +
+  '- capabilities__can: check whether you can do a specific capability\n' +
+  '- capabilities__whyNot: explain what is missing for a capability\n' +
+  '- capabilities__gapReport: list what you cannot do yet\n' +
   'When a question can be answered by running a tool, call it. ' +
+  'For questions about what you can/cannot do, use the capabilities tools rather than guessing. ' +
+  'When the user states a preference or their name, save it with the memory tools. ' +
   'When you run a tool, say what you are doing in plain words before reading the result.';
 
 // Response style suffixes (used when responseStyle is set)

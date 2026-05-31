@@ -8,10 +8,12 @@
 export type ToolRisk = 'low' | 'medium' | 'high';
 
 export type ToolCategory =
-  | 'terminal'   // git / npm / cargo commands
-  | 'cli_agent'  // claude / codex CLI
-  | 'voice'      // voice-related actions
-  | 'system';    // workspace / config
+  | 'terminal'    // git / npm / cargo commands
+  | 'cli_agent'   // claude / codex CLI
+  | 'voice'       // voice-related actions
+  | 'system'      // workspace / config
+  | 'memory'      // read/write AURA's persistent memory + user profile
+  | 'capability'; // query/test AURA's own capability registry
 
 export interface ToolDefinition {
   id: string;
