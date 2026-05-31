@@ -16,11 +16,11 @@
  * Security: API key never in this component.
  */
 
-import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Mic, MicOff, Terminal, Settings2, LayoutGrid, Eye,
-  Radio, Trash2, ChevronDown, ChevronUp, Bot, Database,
-  Wrench, Shield, Keyboard, PlayCircle, StopCircle,
+  Radio, Trash2, ChevronDown, ChevronUp, Shield,
+  Keyboard, PlayCircle, StopCircle,
   AlertTriangle, Moon, Pin,
 } from 'lucide-react';
 import { auraMemoryService } from '../../services/memory/AuraMemoryService';
@@ -34,7 +34,6 @@ import { ApprovalTray } from './ApprovalTray';
 import { NotificationCenter } from './NotificationCenter';
 import { NotificationToast } from './NotificationToast';
 import { useVoiceRuntime } from '../../hooks/useVoiceRuntime';
-import { useRuntimeStatus } from '../../hooks/useRuntimeStatus';
 import { useVoiceRecorder } from '../../hooks/useVoiceRecorder';
 import { useVoiceActivityRecorder } from '../../hooks/useVoiceActivityRecorder';
 import { useSegmentedVoiceSession } from '../../hooks/useSegmentedVoiceSession';
@@ -167,7 +166,6 @@ export function AuraVoiceCore({
 }: AuraVoiceCoreProps) {
 
   const runtime = useVoiceRuntime();
-  const status  = useRuntimeStatus();
 
   // ── Settings ───────────────────────────────────────────────────────────────
   const [voiceSettings, setVoiceSettings] = useState<VoiceConversationSettings>(() => {
@@ -186,10 +184,7 @@ export function AuraVoiceCore({
   // ── Shared turn history ────────────────────────────────────────────────────
   const [turns, setTurns]         = useState<VoiceConversationTurn[]>([]);
   const [convOpen, setConvOpen]   = useState(false);
-  const [memCount, setMemCount]   = useState(0);
   const greetedRef                = useRef(false);
-
-  useEffect(() => auraMemoryService.subscribe(mems => setMemCount(mems.filter(m => m.status !== 'archived').length)), []);
 
   const addTurn = useCallback((turn: VoiceConversationTurn) => {
     setTurns(prev => [...prev, turn].slice(-MAX_VISIBLE_TURNS));
@@ -506,7 +501,6 @@ export function AuraVoiceCore({
   const activeTrayApproval = allApprovals.find(a => a.status === 'pending') ?? allApprovals.find(a => a.status !== 'pending');
   const trayRiskLevel      = activeTrayApproval?.riskLevel ?? 'medium';
   const [isTrayOpen, setIsTrayOpen] = useState(false);
-  const [missionExpanded, setMissionExpanded] = useState(false);
   useEffect(() => { if (allApprovals.length === 0) setIsTrayOpen(false); }, [allApprovals.length]);
 
   const handleApprove = () => { if (activeTrayApproval) runtime.resolveApproval(activeTrayApproval.id, 'approved'); };
@@ -539,29 +533,6 @@ export function AuraVoiceCore({
     if (runtime.activeSpeaker === 'admin' || (voiceSettings.enabled && isRecording)) return 'speaking';
     return 'idle';
   })();
-
-  const statusChips = [
-    {
-      id: 'memory', icon: <Database className="w-3 h-3" />, label: 'Memory',
-      value: memCount > 0 ? `${memCount} saved` : 'Empty',
-      color: memCount > 0 ? 'text-emerald-400' : 'text-zinc-500',
-    },
-    {
-      id: 'relay', icon: <Wrench className="w-3 h-3" />, label: 'Relay',
-      value: status.relayActiveCount !== null ? (status.relayActiveCount > 0 ? `${status.relayActiveCount} active` : 'Ready') : 'Ready',
-      color: 'text-amber-400',
-    },
-    {
-      id: 'tools', icon: <Shield className="w-3 h-3" />, label: 'Tools',
-      value: pendingCount > 0 ? `${pendingCount} pending` : 'Locked',
-      color: pendingCount > 0 ? 'text-amber-400' : 'text-zinc-500',
-    },
-    {
-      id: 'voice', icon: <Radio className="w-3 h-3" />, label: conversationModeEnabled ? 'Conv' : 'Voice',
-      value: conversationModeEnabled ? loopPhaseLabel_text || 'Ready' : (isVoiceActive ? oneShotPhaseLabel(oneShotPhase) : 'Standby'),
-      color: conversationModeEnabled && loop.loopPhase !== 'idle' ? 'text-sky-400' : 'text-indigo-400',
-    },
-  ];
 
   // ── You row ────────────────────────────────────────────────────────────────
   const isListeningState = conversationModeEnabled ? loop.loopPhase === 'listening' : oneShotPhase === 'recording';
@@ -621,41 +592,23 @@ export function AuraVoiceCore({
     <div className="relative flex flex-col h-full min-h-0 w-full bg-gradient-to-b from-zinc-950 via-zinc-950 to-indigo-950/10 overflow-hidden">
       <NotificationToast position="top-right" maxVisible={3} />
 
-      {/* ── Status strip ── */}
+      {/* ── Status strip (Phase 3G: decluttered — orb-centric, minimal top) ── */}
       <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-5 py-2.5 pointer-events-none">
-        <div className="flex items-center gap-2 pointer-events-auto flex-wrap">
-          {statusChips.map(chip => (
-            <Fragment key={chip.id}>
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-900/80 border border-zinc-800/60 rounded-full backdrop-blur-sm">
-                <span className={chip.color}>{chip.icon}</span>
-                <span className="text-[11px] text-zinc-500 font-medium">{chip.label}</span>
-                <span className={cn('text-[11px] font-semibold', chip.color)}>{chip.value}</span>
-              </div>
-            </Fragment>
-          ))}
-          {voiceSettings.wakePhrase && (
+        <div className="flex items-center gap-2 pointer-events-auto">
+          {/* Wake-phrase pill only when actively listening/activated — no static chips */}
+          {voiceSettings.wakePhrase && (wakePhrase.status === 'listening' || wakePhrase.status === 'activated') && (
             <div className={cn(
               'flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-semibold',
-              wakePhrase.status === 'listening'  && 'bg-amber-500/10 border-amber-500/30 text-amber-400',
-              wakePhrase.status === 'unavailable'&& 'bg-rose-500/10 border-rose-500/20 text-rose-400',
-              wakePhrase.status === 'activated'  && 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400',
-              wakePhrase.status === 'disabled'   && 'hidden',
+              wakePhrase.status === 'listening' && 'bg-amber-500/10 border-amber-500/30 text-amber-400',
+              wakePhrase.status === 'activated' && 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400',
             )}>
-              {wakePhrase.status === 'listening'   && <><span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" /> Wake phrase</>}
-              {wakePhrase.status === 'unavailable' && <>Wake phrase unavailable</>}
-              {wakePhrase.status === 'activated'   && <><span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Hey AURA!</>}
+              {wakePhrase.status === 'listening'  && <><span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" /> Wake</>}
+              {wakePhrase.status === 'activated'  && <><span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Hey AURA!</>}
             </div>
           )}
         </div>
 
         <div className="flex items-center gap-2 pointer-events-auto">
-          {runtime.isSafeMode && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/10 border border-amber-500/25 rounded-full">
-              <Eye className="w-3 h-3 text-amber-400" />
-              <span className="text-[11px] text-amber-400 font-semibold">Safe Monitor</span>
-              <button onClick={() => runtime.toggleSafeMode()} className="ml-0.5 text-amber-500/60 hover:text-amber-300 text-[12px]">×</button>
-            </div>
-          )}
           {pendingCount > 0 && (() => {
             const badge = BADGE_RISK[trayRiskLevel] ?? BADGE_RISK.medium;
             return (
@@ -669,38 +622,10 @@ export function AuraVoiceCore({
         </div>
       </div>
 
-      {/* ── Mission card ── */}
-      <div className="shrink-0 pt-12 pb-1 px-4">
-        <div className="max-w-md mx-auto">
-          <button onClick={() => setMissionExpanded(p => !p)} className="w-full flex items-center justify-between px-4 py-2.5 bg-zinc-900/50 border border-zinc-800/50 rounded-xl hover:bg-zinc-900/80 transition-colors">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse flex-shrink-0" />
-              <span className="text-[12px] text-zinc-500 font-medium flex-shrink-0">Mission</span>
-              <span className="text-[13px] font-semibold text-zinc-200 truncate">{runtime.mission.name}</span>
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-              <Bot className="w-3 h-3 text-indigo-400" />
-              <span className="text-[11px] text-indigo-400 font-medium">{runtime.mission.agent}</span>
-              {missionExpanded ? <ChevronUp className="w-3.5 h-3.5 text-zinc-500" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />}
-            </div>
-          </button>
-          {missionExpanded && (
-            <div className="px-4 py-3 bg-zinc-900/50 border border-zinc-800/40 border-t-0 rounded-b-xl">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-[11px] text-zinc-500">Phase</span>
-                <span className="text-[11px] text-zinc-300 font-medium">{runtime.mission.phase}</span>
-                <span className="ml-auto text-[11px] text-zinc-500">{runtime.mission.progress}%</span>
-              </div>
-              <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
-                <div className="h-full bg-indigo-500 rounded-full transition-all" style={{ width: `${runtime.mission.progress}%` }} />
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      {/* Mission box removed (Phase 3G UI cleanup) — project/mission state lives in Console → Memory. */}
 
       {/* ── Orb + transcript (scrollable) ── */}
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col items-center px-4 py-2 pb-0 gap-3">
+      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col items-center px-4 pt-14 pb-0 gap-3">
         <AuraVoiceVisualizer state={effectiveVis} source={conversationModeEnabled && loop.loopPhase === 'listening' ? 'admin' : (isVoiceActive ? 'aura' : 'aura')} size="xl" showLabel />
         <AdminVoiceIndicator state={adminState} />
 
