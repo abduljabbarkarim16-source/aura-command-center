@@ -12,11 +12,13 @@ import React, { Fragment, useState } from 'react';
 import {
   X, FolderKanban, Workflow, BringToFront, Activity,
   Settings2, ShieldCheck, AlertTriangle, CheckCircle2,
-  ArrowRight, Target, Bot, HardDrive, GitBranch, RefreshCw, ListTodo,
+  ArrowRight, Target, Bot, HardDrive, GitBranch, RefreshCw, ListTodo, Brain, Sparkles,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useWorkspaceController } from '../../hooks/useWorkspaceController';
 import { BackgroundTasksPanel } from './BackgroundTasksPanel';
+import { AuraMemoryPanel } from './AuraMemoryPanel';
+import { AuraPersonalityPanel } from './AuraPersonalityPanel';
 
 // ─── Mock data ────────────────────────────────────────────────────────────────
 
@@ -82,7 +84,7 @@ export function AdminPanelOverlay({
   onOpenTechnicalDrawer,
 }: AdminPanelOverlayProps) {
   const { activeWorkspace, lastScan, isScanning, scan } = useWorkspaceController();
-  const [activeTab, setActiveTab] = useState<'overview' | 'tasks'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'tasks' | 'memory' | 'personality'>('overview');
 
   return (
     <>
@@ -121,8 +123,10 @@ export function AdminPanelOverlay({
         {/* Tab bar */}
         <div className="flex shrink-0 border-b border-zinc-800/60 px-5 gap-1 pt-2">
           {([
-            { id: 'overview', label: 'Overview',    icon: <Activity className="w-3 h-3" /> },
-            { id: 'tasks',    label: 'Background Tasks', icon: <ListTodo className="w-3 h-3" /> },
+            { id: 'overview',     label: 'Overview',    icon: <Activity   className="w-3 h-3" /> },
+            { id: 'memory',       label: 'Memory',      icon: <Brain      className="w-3 h-3" /> },
+            { id: 'personality',  label: 'Personality', icon: <Sparkles   className="w-3 h-3" /> },
+            { id: 'tasks',        label: 'Tasks',       icon: <ListTodo   className="w-3 h-3" /> },
           ] as const).map(tab => (
             <button
               key={tab.id}
@@ -143,6 +147,20 @@ export function AdminPanelOverlay({
         {activeTab === 'tasks' && (
           <div className="flex-1 min-h-0 overflow-hidden">
             <BackgroundTasksPanel />
+          </div>
+        )}
+
+        {/* Memory tab */}
+        {activeTab === 'memory' && (
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <AuraMemoryPanel />
+          </div>
+        )}
+
+        {/* Personality tab */}
+        {activeTab === 'personality' && (
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <AuraPersonalityPanel />
           </div>
         )}
 

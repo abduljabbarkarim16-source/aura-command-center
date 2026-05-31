@@ -21,6 +21,8 @@ import { useSegmentedVoiceSession } from './useSegmentedVoiceSession';
 import { openAIVoiceSessionService } from '../services/voice/OpenAIVoiceSessionService';
 import { voiceTranscriptLogService } from '../services/voice/VoiceTranscriptLogService';
 import { voiceLatencyService } from '../services/voice/VoiceLatencyService';
+import { auraMemoryService } from '../services/memory/AuraMemoryService';
+import { auraPersonalityService } from '../services/personality/AuraPersonalityService';
 import { notifyVoiceError } from '../services/notifications/NotificationService';
 import type { VoiceConversationSettings, VoiceConversationTurn } from '../types/voice-session';
 import type { VADPhase } from './useVoiceActivityRecorder';
@@ -314,8 +316,11 @@ export function useConversationLoop(config: ConversationLoopConfig) {
 
     updatePhase('thinking');
 
-    // Start latency tracking
+    // Build dynamic system prompt (personality + memories) once per turn
     const style = settingsRef.current.responseStyle ?? 'normal';
+    const systemPrompt = auraPersonalityService.buildSystemPrompt({ responseStyle: style });
+
+    // Start latency tracking
     const latencyStyle = fastResponseModeRef.current ? 'fast' : (style as 'brief' | 'normal' | 'detailed');
     const turnId = voiceLatencyService.startTurn({
       responseStyle: latencyStyle,
@@ -351,7 +356,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
 
           // Full response runs concurrently
           const fullResult = await openAIVoiceSessionService.createChatResponse(
-            transcript, style as 'brief' | 'normal' | 'detailed',
+            transcript, style as 'brief' | 'normal' | 'detailed', systemPrompt,
           );
           const fullText = fullResult.success ? fullResult.text ?? fastResult.text : fastResult.text;
           setLiveTranscript({ user: transcript, aura: fullText });
@@ -378,6 +383,12 @@ export function useConversationLoop(config: ConversationLoopConfig) {
           };
           onTurnRef.current(turn);
           voiceTranscriptLogService.logTurn({ userText: transcript, auraText: fullText, durationMs: elapsed });
+          // Async memory extraction — never blocks voice response
+          openAIVoiceSessionService.extractMemory(transcript, fullText).then(result => {
+            if (result.facts.length > 0) {
+              auraMemoryService.addMany(result.facts, 'auto', transcript.slice(0, 100));
+            }
+          });
           return;
         }
       }
@@ -386,7 +397,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
 
     // ── PATH 2 & 3: Full response ──────────────────────────────────────────
     const chatResult = await openAIVoiceSessionService.createChatResponse(
-      transcript, style as 'brief' | 'normal' | 'detailed',
+      transcript, style as 'brief' | 'normal' | 'detailed', systemPrompt,
     );
     voiceLatencyService.markChatEnd(turnId);
 
@@ -481,6 +492,12 @@ export function useConversationLoop(config: ConversationLoopConfig) {
           };
           onTurnRef.current(turn);
           voiceTranscriptLogService.logTurn({ userText: transcript, auraText: chatResult.text, durationMs: elapsed });
+          // Async memory extraction
+          openAIVoiceSessionService.extractMemory(transcript, chatResult.text).then(result => {
+            if (result.facts.length > 0) {
+              auraMemoryService.addMany(result.facts, 'auto', transcript.slice(0, 100));
+            }
+          });
           return;
         }
       }
@@ -504,6 +521,12 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     voiceTranscriptLogService.logTurn({
       userText: transcript, auraText: chatResult.text,
       durationMs: elapsed, chatLatencyMs: chatResult.latencyMs, ttsLatencyMs: ttsResult.latencyMs,
+    });
+    // Async memory extraction — fire and forget
+    openAIVoiceSessionService.extractMemory(transcript, chatResult.text).then(result => {
+      if (result.facts.length > 0) {
+        auraMemoryService.addMany(result.facts, 'auto', transcript.slice(0, 100));
+      }
     });
 
     if (!ttsResult.success || !ttsResult.audioBlobUrl) {
@@ -606,6 +629,17 @@ export function useConversationLoop(config: ConversationLoopConfig) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Explicit "Remember this" — saves last turn to memory ─────────────────
+  const rememberLastTurn = useCallback((
+    userText: string,
+    auraText: string,
+    category: 'personal' | 'task' = 'task',
+  ) => {
+    if (!userText.trim() && !auraText.trim()) return;
+    const content = auraText.trim() || userText.trim();
+    auraMemoryService.add({ category, source: 'explicit', content, context: userText.slice(0, 100) });
+  }, []);
+
   return {
     loopPhase,
     vadPhase:      segSession.vadPhase as VADPhase,
@@ -621,5 +655,6 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     resumeFromDormant,
     manualFinish,
     interruptSpeech,
+    rememberLastTurn,
   };
 }

@@ -261,12 +261,16 @@ pub async fn openai_transcribe_audio(
 /// Generate a short AURA chat response for a transcript.
 /// History is an optional array of prior {role, content} messages (max 6 sent).
 /// response_style controls response length: "brief" | "normal" | "detailed" (default "normal").
+/// system_prompt_override: if provided by the frontend, replaces the hardcoded base prompt.
+///   This allows personality config + injected memories to flow in from the frontend.
+///   If not provided, falls back to the built-in AURA_SYSTEM_PROMPT_BASE.
 /// Returns the response text or an error string.
 #[tauri::command]
 pub async fn openai_chat_response(
     transcript: String,
     history: Vec<ChatMessage>,
     response_style: Option<String>,
+    system_prompt_override: Option<String>,
 ) -> Result<String, String> {
     if transcript.trim().is_empty() {
         return Err("Transcript is empty".to_string());
@@ -278,13 +282,27 @@ pub async fn openai_chat_response(
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    // Build dynamic system prompt based on response style
-    let style_suffix = match response_style.as_deref().unwrap_or("normal") {
-        "brief"    => RESPONSE_STYLE_BRIEF,
-        "detailed" => RESPONSE_STYLE_DETAILED,
-        _          => RESPONSE_STYLE_NORMAL, // "normal" and anything else
+    // Use frontend-built prompt if provided (includes personality + memories),
+    // otherwise fall back to built-in base + style suffix
+    let system_prompt = if let Some(override_prompt) = system_prompt_override {
+        if !override_prompt.trim().is_empty() {
+            override_prompt
+        } else {
+            let style_suffix = match response_style.as_deref().unwrap_or("normal") {
+                "brief"    => RESPONSE_STYLE_BRIEF,
+                "detailed" => RESPONSE_STYLE_DETAILED,
+                _          => RESPONSE_STYLE_NORMAL,
+            };
+            format!("{}{}", AURA_SYSTEM_PROMPT_BASE, style_suffix)
+        }
+    } else {
+        let style_suffix = match response_style.as_deref().unwrap_or("normal") {
+            "brief"    => RESPONSE_STYLE_BRIEF,
+            "detailed" => RESPONSE_STYLE_DETAILED,
+            _          => RESPONSE_STYLE_NORMAL,
+        };
+        format!("{}{}", AURA_SYSTEM_PROMPT_BASE, style_suffix)
     };
-    let system_prompt = format!("{}{}", AURA_SYSTEM_PROMPT_BASE, style_suffix);
 
     // Build messages — system + last 6 history turns + current user turn
     let mut messages: Vec<serde_json::Value> = vec![
@@ -382,6 +400,99 @@ pub async fn openai_fast_chat_response(
         .unwrap_or("")
         .trim()
         .to_string())
+}
+
+/// Extract memorable facts from a conversation turn.
+///
+/// Given a user message and AURA's response, asks gpt-4o-mini to extract
+/// any facts worth remembering (personal facts about the user, or project/task decisions).
+/// Returns a JSON array of { category: "personal"|"task", content: string } objects.
+/// Returns "[]" if nothing is worth remembering.
+///
+/// This runs async after a turn completes so it never blocks voice response latency.
+#[tauri::command]
+pub async fn openai_extract_memory(
+    user_text: String,
+    aura_text: String,
+) -> Result<String, String> {
+    if user_text.trim().is_empty() {
+        return Ok("[]".to_string());
+    }
+
+    let key = get_openai_key()?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let system = "You extract memorable facts from AI assistant conversations. \
+        Given a user message and assistant reply, extract facts worth remembering long-term. \
+        Personal facts: user's name, preferences, role, location, habits, recurring topics. \
+        Task facts: decisions made, project names, technical choices, goals set, problems solved. \
+        Ignore small talk, greetings, thanks, and ephemeral requests. \
+        Respond ONLY with a JSON array. Each item: {\"category\":\"personal\"|\"task\",\"content\":\"fact\"}. \
+        If nothing is worth remembering, respond with []. \
+        Keep each fact under 150 characters. Max 3 facts per turn.";
+
+    let user_msg = format!(
+        "User said: {}\nAssistant replied: {}",
+        user_text.trim().chars().take(300).collect::<String>(),
+        aura_text.trim().chars().take(300).collect::<String>(),
+    );
+
+    let messages = serde_json::json!([
+        { "role": "system", "content": system },
+        { "role": "user",   "content": user_msg }
+    ]);
+
+    let body = serde_json::json!({
+        "model": CHAT_MODEL,
+        "max_tokens": 200,
+        "messages": messages,
+        "response_format": { "type": "json_object" },
+    });
+
+    // Attempt extraction — return empty array on any failure so callers are never blocked
+    let res = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .header("Authorization", format!("Bearer {key}"))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await;
+
+    let res = match res {
+        Ok(r)  => r,
+        Err(_) => return Ok("[]".to_string()),
+    };
+
+    if !res.status().is_success() {
+        return Ok("[]".to_string());
+    }
+
+    let data: serde_json::Value = match res.json().await {
+        Ok(d)  => d,
+        Err(_) => return Ok("[]".to_string()),
+    };
+
+    let raw = data["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("[]")
+        .trim()
+        .to_string();
+
+    // Parse and re-serialize to ensure it is valid JSON array
+    // The model returns { "facts": [...] } or [...] depending on response_format
+    let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!([]));
+    let arr = if parsed.is_array() {
+        parsed
+    } else if let Some(arr) = parsed.get("facts").and_then(|v| v.as_array()) {
+        serde_json::Value::Array(arr.clone())
+    } else {
+        serde_json::json!([])
+    };
+
+    Ok(arr.to_string())
 }
 
 /// Convert text to speech using OpenAI TTS.

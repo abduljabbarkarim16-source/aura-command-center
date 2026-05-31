@@ -28,6 +28,7 @@ import type {
   OpenAIRealtimeSessionRequest,
   OpenAIRealtimeSessionResponse,
 } from '../../types/voice-session';
+import type { MemoryExtractionResult } from '../../types/aura-memory';
 
 // ─── History message shape (matches Rust ChatMessage) ─────────────────────────
 
@@ -75,6 +76,7 @@ class OpenAIVoiceSessionServiceImpl {
   async createChatResponse(
     transcript: string,
     responseStyle: 'brief' | 'normal' | 'detailed' = 'normal',
+    systemPromptOverride?: string,
   ): Promise<VoiceChatResult> {
     if (!transcript.trim()) return { success: false, error: 'Empty transcript' };
     const start = Date.now();
@@ -86,6 +88,7 @@ class OpenAIVoiceSessionServiceImpl {
         transcript: transcript.trim(),
         history: historySlice,
         responseStyle,
+        systemPromptOverride: systemPromptOverride ?? null,
       });
 
       // Store this turn in history
@@ -123,6 +126,25 @@ class OpenAIVoiceSessionServiceImpl {
       return { success: true, text: text.trim(), latencyMs: Date.now() - start };
     } catch (err) {
       return { success: false, error: String(err), latencyMs: Date.now() - start };
+    }
+  }
+
+  // ── Memory extraction — runs async after a turn, never blocks voice ────────
+
+  async extractMemory(userText: string, auraText: string): Promise<MemoryExtractionResult> {
+    try {
+      const raw = await invoke<string>('openai_extract_memory', {
+        userText: userText.trim(),
+        auraText: auraText.trim(),
+      });
+      const parsed = JSON.parse(raw) as Array<{ category: string; content: string }>;
+      return {
+        facts: parsed
+          .filter(f => (f.category === 'personal' || f.category === 'task') && f.content?.trim())
+          .map(f => ({ category: f.category as 'personal' | 'task', content: f.content.trim() })),
+      };
+    } catch {
+      return { facts: [] };
     }
   }
 

@@ -21,8 +21,9 @@ import {
   Mic, MicOff, Terminal, Settings2, LayoutGrid, Eye,
   Radio, Trash2, ChevronDown, ChevronUp, Bot, Database,
   Wrench, Shield, Keyboard, PlayCircle, StopCircle,
-  AlertTriangle, Moon,
+  AlertTriangle, Moon, Pin,
 } from 'lucide-react';
+import { auraMemoryService } from '../../services/memory/AuraMemoryService';
 import { cn } from '../../lib/utils';
 import { AuraVoiceVisualizer } from './AuraVoiceVisualizer';
 import type { VisualizerState } from './AuraVoiceVisualizer';
@@ -197,7 +198,10 @@ export function AuraVoiceCore({
   // ── Shared turn history ────────────────────────────────────────────────────
   const [turns, setTurns]         = useState<VoiceConversationTurn[]>([]);
   const [convOpen, setConvOpen]   = useState(false);
+  const [memCount, setMemCount]   = useState(0);
   const greetedRef                = useRef(false);
+
+  useEffect(() => auraMemoryService.subscribe(mems => setMemCount(mems.filter(m => m.status !== 'archived').length)), []);
 
   const addTurn = useCallback((turn: VoiceConversationTurn) => {
     setTurns(prev => [...prev, turn].slice(-MAX_VISIBLE_TURNS));
@@ -535,8 +539,8 @@ export function AuraVoiceCore({
   const statusChips = [
     {
       id: 'memory', icon: <Database className="w-3 h-3" />, label: 'Memory',
-      value: status.memoryCount !== null ? (status.memoryCount > 0 ? `${status.memoryCount} saved` : 'Empty') : 'Active',
-      color: 'text-emerald-400',
+      value: memCount > 0 ? `${memCount} saved` : 'Empty',
+      color: memCount > 0 ? 'text-emerald-400' : 'text-zinc-500',
     },
     {
       id: 'relay', icon: <Wrench className="w-3 h-3" />, label: 'Relay',
@@ -745,6 +749,21 @@ export function AuraVoiceCore({
                   <span className="w-1 h-1 rounded-full bg-zinc-600" />Auto-stop on pause
                 </span>
               )}
+              {/* Remember this — save last AURA response to memory */}
+              {liveTranscript?.aura && loop.loopPhase !== 'listening' && loop.loopPhase !== 'idle' && (
+                <button
+                  onClick={() => loop.rememberLastTurn(
+                    liveTranscript.user ?? '',
+                    liveTranscript.aura ?? '',
+                    'task',
+                  )}
+                  title="Save this to AURA's memory"
+                  className="flex items-center gap-1 text-[10px] text-zinc-600 hover:text-indigo-400 transition-colors"
+                >
+                  <Pin className="w-2.5 h-2.5" /> Remember
+                </button>
+              )}
+
               {/* Latency display (last turn) */}
               {loop.lastLatencyMetrics && (
                 <span
