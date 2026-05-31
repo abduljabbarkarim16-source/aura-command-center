@@ -1,9 +1,9 @@
 {
-  "version": "0.4.3",
-  "phase": "3G",
-  "phaseName": "Internal Agent Operating System",
+  "version": "0.5.0",
+  "phase": "3J",
+  "phaseName": "Operator UI/UX Refinement",
   "updated": "2026-05-31",
-  "agent": "Claude (Anthropic · claude-opus-4-8)",
+  "agent": "Claude (Anthropic / claude-opus-4-8)",
   "note": "Design-time manifest. Runtime status is refined by CapabilityRegistryService.test(); items marked 'testable' are confirmed live, not asserted here.",
   "capabilities": {
     "voice.shortSpeech": { "status": "available", "testable": false },
@@ -40,7 +40,7 @@
   "nativeBridge": {
     "status": "active",
     "execution": "allowlisted commands only via run_allowed_command",
-    "workspaceResolution": "persisted AppData path → repo-marker walk-up → cwd fallback",
+    "workspaceResolution": "persisted AppData path -> repo-marker walk-up -> cwd fallback",
     "shell": "safe-allowlist-only",
     "rejects": ["arbitrary shell", "metacharacters", "git reset --hard", "non-allowlisted binaries"]
   },
@@ -58,7 +58,7 @@
     "centerConsoleAndVoice": true,
     "rightPanel": {
       "status": "active",
-      "tabs": ["tasks", "capabilities", "memory", "self-test", "logs"]
+      "tabs": ["activity", "tasks", "terminal", "logs", "memory", "capabilities", "recipes", "notifications", "details"]
     }
   },
   "commandPolicy": {

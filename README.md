@@ -2,7 +2,7 @@
 
 **AURA** - *Autonomous Unified Reasoning Agent* - is a voice-first AI desktop operator built with Tauri, Rust, React, and TypeScript.
 
-**Current version:** v0.4.3 - Phase 3G (Internal Agent Operating System)
+**Current version:** v0.5.0 - Phase 3J (Operator UI/UX Refinement)
 
 ## What Works Now
 
@@ -24,7 +24,7 @@
 
 - **Voice Core** - primary operator surface with voice controls, approvals, memory, and technical drawers.
 - **Notifications** - voice/runtime errors route to the notification tray.
-- **Right-side operator panel** - notifications, transcript, terminal, tasks, planning, diff, files, and logs.
+- **Right-side operator panel** - Activity, Tasks, Terminal, Logs, Memory, Capabilities, Recipes, Notifications, and Details.
 - **Provider readiness** - local status and approval-gated smoke tests in Settings.
 - **Demo-data notices** - mock-backed pages and panels are visibly labeled.
 
@@ -47,10 +47,10 @@
 
 ### Installer
 
-Download the installer from `src-tauri/target/release/bundle/nsis/`:
+Download the installer from `src-tauri/target/release/bundle/nsis/` after running `npm run tauri:build`:
 
 ```text
-AURA Command Center_0.4.1_x64-setup.exe
+AURA Command Center_0.5.0_x64-setup.exe
 ```
 
 Run the installer, then launch AURA Command Center from the Start menu.

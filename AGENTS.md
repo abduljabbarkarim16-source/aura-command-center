@@ -1,7 +1,7 @@
-# AGENTS.md — AURA Agent Collaboration Rules
+# AGENTS.md - AURA Agent Collaboration Rules
 
 **Project:** AURA Command Center
-**Version:** Phase 3G — Internal Agent OS (v0.4.3)
+**Version:** Phase 3J - Operator UI/UX Refinement (v0.5.0)
 **Last updated:** 2026-05-31
 
 ---
@@ -107,10 +107,10 @@ When you fix a bug or learn a lesson:
 
 ## Voice QA Rules
 
-- Test short speech (3–5s): must work
-- Test medium speech (10–15s): must work
-- Test long speech (20–30s): must not falsely return "No speech detected"
-- Natural pause (1.5–2s) mid-sentence: must NOT trigger auto-stop
+- Test short speech (3-5s): must work
+- Test medium speech (10-15s): must work
+- Test long speech (20-30s): must not falsely return "No speech detected"
+- Natural pause (1.5-2s) mid-sentence: must NOT trigger auto-stop
 - Quiet environment: noise-floor calibration must set correct threshold
 - Noisy environment: VAD must filter ambient noise before triggering
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Activity } from 'lucide-react';
-import { RuntimeTask, RuntimeTaskStatus } from '../../types/runtime-task';
+import type { RuntimeTask } from '../../types/runtime-task';
 import { runtimeTaskService } from '../../services/runtime/RuntimeTaskService';
 
 export function RuntimeTaskBadge() {

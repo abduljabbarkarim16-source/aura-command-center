@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Terminal, Database, Shield, Zap, CheckCircle2, AlertCircle, Clock, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
-import { XSquare } from 'lucide-react';
+import { Terminal, Database, Shield, Zap, Clock, Trash2, ChevronDown, ChevronRight, XSquare, Activity } from 'lucide-react';
 import { runtimeTaskService } from '../../services/runtime/RuntimeTaskService';
 import type { RuntimeTask } from '../../types/runtime-task';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'motion/react';
+
+function formatElapsed(ms?: number): string {
+  if (ms == null) return '';
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.round(ms / 60_000)}m`;
+}
 
 export function RuntimeTaskHistoryPanel() {
   const [tasks, setTasks] = useState<RuntimeTask[]>([]);
@@ -34,7 +40,7 @@ export function RuntimeTaskHistoryPanel() {
   if (tasks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-zinc-500 p-6 text-center">
-        <ActivityIcon className="w-8 h-8 mb-3 opacity-20" />
+        <Activity className="w-8 h-8 mb-3 opacity-20" />
         <p className="text-[13px] font-medium text-zinc-400">No runtime tasks yet</p>
         <p className="text-[12px] mt-1 text-zinc-600">Tasks executed by AURA will appear here.</p>
       </div>
@@ -112,7 +118,7 @@ export function RuntimeTaskHistoryPanel() {
                         {new Date(task.createdAt).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute:'2-digit', second:'2-digit' })}
                       </span>
                       {task.elapsedMs && (
-                        <span className="font-mono">{task.elapsedMs}ms</span>
+                        <span className="font-mono">{formatElapsed(task.elapsedMs)}</span>
                       )}
                       <span>source: {task.source}</span>
                     </div>
@@ -183,14 +189,5 @@ export function RuntimeTaskHistoryPanel() {
         </AnimatePresence>
       </div>
     </div>
-  );
-}
-
-// Just a tiny internal icon if empty
-function ActivityIcon(props: any) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-      <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-    </svg>
   );
 }

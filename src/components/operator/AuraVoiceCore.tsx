@@ -1,16 +1,16 @@
 /**
- * AuraVoiceCore — Phase 3E QA
+ * AuraVoiceCore - voice-first operator surface
  *
  * Two modes:
- *  1. Conversation Mode (hands-free loop): Start → listen → respond → listen…
+ *  1. Conversation Mode (hands-free loop): Start -> listen -> respond -> listen...
  *     Barge-in, dormancy, stop phrases all handled automatically.
- *  2. One-Shot Speak (manual fallback): click Speak → speak → click Finish.
+ *  2. One-Shot Speak (manual fallback): click Speak -> speak -> click Finish.
  *
- * Phase 3E QA fixes:
+ * Runtime voice behavior:
  *  - Conversation mode with auto-listen-after-response
  *  - Natural barge-in via secondary AnalyserNode while TTS plays
  *  - Wake phrase: improved status + test button
- *  - All errors → NotificationService (no inline banners)
+ *  - All errors -> NotificationService (no inline banners)
  *  - Keyboard hotkey Ctrl+Shift+Space
  *
  * Security: API key never in this component.
@@ -18,10 +18,10 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Mic, MicOff, Terminal, Settings2, LayoutGrid, Eye,
-  Radio, Trash2, ChevronDown, ChevronUp, Shield,
+  Mic, MicOff, Terminal, Settings2,
+  Radio, Shield,
   Keyboard, PlayCircle, StopCircle,
-  AlertTriangle, Moon, Pin,
+  AlertTriangle, Moon, Pin, Zap,
 } from 'lucide-react';
 import { auraMemoryService } from '../../services/memory/AuraMemoryService';
 import { auraPersonalityService } from '../../services/personality/AuraPersonalityService';
@@ -33,6 +33,7 @@ import type { AdminVoiceState } from './AdminVoiceIndicator';
 import { ApprovalTray } from './ApprovalTray';
 import { NotificationCenter } from './NotificationCenter';
 import { NotificationToast } from './NotificationToast';
+import { PermissionModeSelector } from './PermissionModeSelector';
 import { useVoiceRuntime } from '../../hooks/useVoiceRuntime';
 import { useVoiceRecorder } from '../../hooks/useVoiceRecorder';
 import { useVoiceActivityRecorder } from '../../hooks/useVoiceActivityRecorder';
@@ -47,7 +48,7 @@ import type { VoiceRuntimeState } from '../../types/voice-runtime';
 import type { VoiceConversationTurn, VoiceConversationSettings } from '../../types/voice-session';
 import { DEFAULT_VOICE_SETTINGS } from '../../types/voice-session';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// --- Constants ----------------------------------------------------------------
 
 const GREETING_SESSION_KEY = 'aura_greeting_shown';
 const MAX_VISIBLE_TURNS = 5;
@@ -72,7 +73,7 @@ const BADGE_RISK: Record<string, { bg: string; border: string; text: string }> =
   critical: { bg: 'bg-rose-500/15',    border: 'border-rose-500/30',    text: 'text-rose-400'   },
 };
 
-// ─── One-shot conversation phase (manual mode) ────────────────────────────────
+// --- One-shot conversation phase (manual mode) --------------------------------
 
 type OneShotPhase =
   | 'idle'
@@ -86,11 +87,11 @@ type OneShotPhase =
 
 function oneShotPhaseLabel(phase: OneShotPhase): string {
   switch (phase) {
-    case 'connecting':   return 'Starting…';
-    case 'recording':    return 'Listening…';
-    case 'transcribing': return 'Processing…';
-    case 'thinking':     return 'Thinking…';
-    case 'speaking':     return 'Speaking…';
+    case 'connecting':   return 'Starting...';
+    case 'recording':    return 'Listening...';
+    case 'transcribing': return 'Processing...';
+    case 'thinking':     return 'Thinking...';
+    case 'speaking':     return 'Speaking...';
     case 'interrupted':  return 'Interrupted';
     case 'error':        return 'Error';
     default:             return '';
@@ -108,7 +109,7 @@ function oneShotPhaseVisualizer(phase: OneShotPhase): VisualizerState {
   }
 }
 
-// ─── Conversation mode visualizer mapping ─────────────────────────────────────
+// --- Conversation mode visualizer mapping -------------------------------------
 
 import type { LoopPhase } from '../../hooks/useConversationLoop';
 
@@ -128,30 +129,29 @@ function loopPhaseVisualizer(phase: LoopPhase): VisualizerState {
 
 function loopPhaseLabel(phase: LoopPhase): string {
   switch (phase) {
-    case 'listening':       return 'Listening…';
-    case 'transcribing':    return 'Processing…';
-    case 'acknowledging':   return 'Heard…';
-    case 'thinking':        return 'Thinking…';
-    case 'preparing_voice': return 'Preparing voice…';
-    case 'speaking':        return 'Speaking…';
+    case 'listening':       return 'Listening...';
+    case 'transcribing':    return 'Processing...';
+    case 'acknowledging':   return 'Heard...';
+    case 'thinking':        return 'Thinking...';
+    case 'preparing_voice': return 'Preparing voice...';
+    case 'speaking':        return 'Speaking...';
     case 'dormant':         return 'Dormant';
     case 'error':           return 'Error';
     default:                return '';
   }
 }
 
-// ─── Props ────────────────────────────────────────────────────────────────────
+// --- Props --------------------------------------------------------------------
 
 interface AuraVoiceCoreProps {
   /** @deprecated */ auraState?: VisualizerState;
   /** @deprecated */ adminVoiceState?: AdminVoiceState;
   /** @deprecated */ safeMonitorMode?: boolean;
   onOpenConsole: () => void;
-  onOpenAdminPanel: () => void;
   onOpenTechnicalDrawer: () => void;
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// --- Component ----------------------------------------------------------------
 
 export function AuraVoiceCore({
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -161,13 +161,12 @@ export function AuraVoiceCore({
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   safeMonitorMode: _c,
   onOpenConsole,
-  onOpenAdminPanel,
   onOpenTechnicalDrawer,
 }: AuraVoiceCoreProps) {
 
   const runtime = useVoiceRuntime();
 
-  // ── Settings ───────────────────────────────────────────────────────────────
+  // -- Settings ---------------------------------------------------------------
   const [voiceSettings, setVoiceSettings] = useState<VoiceConversationSettings>(() => {
     try {
       const stored = localStorage.getItem('voice.conversation.settings');
@@ -176,14 +175,13 @@ export function AuraVoiceCore({
     } catch { return { ...DEFAULT_VOICE_SETTINGS }; }
   });
 
-  // Conversation mode settings (extra — not in base VoiceConversationSettings yet)
+  // Conversation mode settings (extra - not in base VoiceConversationSettings yet)
   const [conversationModeEnabled, setConversationModeEnabled] = useState(false);
   const [autoListen] = useState(true);
   const [dormancyMs] = useState(90_000); // 90s default
 
-  // ── Shared turn history ────────────────────────────────────────────────────
+  // -- Shared turn history ----------------------------------------------------
   const [turns, setTurns]         = useState<VoiceConversationTurn[]>([]);
-  const [convOpen, setConvOpen]   = useState(false);
   const greetedRef                = useRef(false);
 
   const addTurn = useCallback((turn: VoiceConversationTurn) => {
@@ -199,7 +197,7 @@ export function AuraVoiceCore({
     });
   }, []);
 
-  // ── Conversation loop (hands-free mode) ────────────────────────────────────
+  // -- Conversation loop (hands-free mode) ------------------------------------
   const [loopPhaseLabel_text, setLoopPhaseLabel] = useState('');
   const loop = useConversationLoop({
     voiceSettings,
@@ -213,7 +211,7 @@ export function AuraVoiceCore({
     toolDispatchEnabled: voiceSettings.toolDispatchEnabled ?? true,
   });
 
-  // ── One-shot manual mode ───────────────────────────────────────────────────
+  // -- One-shot manual mode ---------------------------------------------------
   const [oneShotPhase, setOneShotPhase]     = useState<OneShotPhase>('idle');
   const [liveTranscriptOS, setLiveTranscriptOS] = useState<{ user: string; aura: string } | null>(null);
   const [currentAudioUrl, setCurrentAudioUrl]   = useState<string | null>(null);
@@ -244,7 +242,7 @@ export function AuraVoiceCore({
 
   const oneshotRecorder = voiceSettings.autoStopEnabled ? vadRecorder : manualRecorder;
 
-  // ── Wake phrase ────────────────────────────────────────────────────────────
+  // -- Wake phrase ------------------------------------------------------------
   const handleWakeActivated = useCallback(() => {
     if (conversationModeEnabled && loop.loopPhase === 'idle') {
       loop.startConversation();
@@ -265,7 +263,7 @@ export function AuraVoiceCore({
 
   const handleOneShotStartRef = useRef<(() => Promise<void>) | null>(null);
 
-  // ── Sync transcript log persistence ───────────────────────────────────────
+  // -- Sync transcript log persistence ---------------------------------------
   useEffect(() => {
     voiceTranscriptLogService.setPersistEnabled(voiceSettings.persistTranscripts ?? false);
   }, [voiceSettings.persistTranscripts]);
@@ -275,7 +273,7 @@ export function AuraVoiceCore({
     catch { /* ignore */ }
   }, [voiceSettings]);
 
-  // ── Wake phrase lifecycle ──────────────────────────────────────────────────
+  // -- Wake phrase lifecycle --------------------------------------------------
   useEffect(() => {
     const isIdle = conversationModeEnabled ? loop.loopPhase === 'idle' : oneShotPhase === 'idle';
     if (voiceSettings.wakePhrase && voiceSettings.enabled && isIdle) {
@@ -286,7 +284,7 @@ export function AuraVoiceCore({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voiceSettings.wakePhrase, voiceSettings.enabled, loop.loopPhase, oneShotPhase, conversationModeEnabled]);
 
-  // ── Voice intro ────────────────────────────────────────────────────────────
+  // -- Voice intro ------------------------------------------------------------
   useEffect(() => {
     if (greetedRef.current || sessionStorage.getItem(GREETING_SESSION_KEY)) {
       greetedRef.current = true; return;
@@ -311,25 +309,25 @@ export function AuraVoiceCore({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── One-shot processing pipeline ───────────────────────────────────────────
+  // -- One-shot processing pipeline -------------------------------------------
   const processOneShotBlob = useCallback(async (blob: Blob, durationMs: number) => {
     runningRef.current = true;
     setOneShotPhase('transcribing');
-    setLiveTranscriptOS({ user: '…', aura: '' });
+    setLiveTranscriptOS({ user: '...', aura: '' });
 
     if (blob.size === 0) {
       notifyVoiceError('No audio captured. Check microphone permissions.');
       setOneShotPhase('idle'); setLiveTranscriptOS(null); runningRef.current = false; return;
     }
     if (blob.size < 200 && durationMs > 500) {
-      notifyVoiceError('Mic input too quiet — speak closer to the mic.');
+      notifyVoiceError('Mic input too quiet - speak closer to the mic.');
       setOneShotPhase('idle'); setLiveTranscriptOS(null); runningRef.current = false; return;
     }
     if (blob.size > MAX_BLOB_BYTES) {
-      notifyVoiceError('Recording too long — keep under 45 seconds.');
+      notifyVoiceError('Recording too long - keep under 45 seconds.');
       setOneShotPhase('idle'); setLiveTranscriptOS(null); runningRef.current = false; return;
     }
-    if (blob.size > LONG_SPEECH_BLOB_BYTES) setLiveTranscriptOS({ user: 'Long thought captured…', aura: '' });
+    if (blob.size > LONG_SPEECH_BLOB_BYTES) setLiveTranscriptOS({ user: 'Long thought captured...', aura: '' });
 
     const sttResult = await openAIVoiceSessionService.transcribeAudio(blob);
     if (!sttResult.success) {
@@ -337,7 +335,7 @@ export function AuraVoiceCore({
       setOneShotPhase('idle'); setLiveTranscriptOS(null); runningRef.current = false; return;
     }
     if (!sttResult.text?.trim()) {
-      notifyVoiceError('No speech detected — try speaking closer to the mic.');
+      notifyVoiceError('No speech detected - try speaking closer to the mic.');
       setOneShotPhase('idle'); setLiveTranscriptOS(null); runningRef.current = false; return;
     }
 
@@ -382,7 +380,7 @@ export function AuraVoiceCore({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentAudioUrl, addTurn, extractMemoryIfEnabled]);
 
-  // ── One-shot handlers ──────────────────────────────────────────────────────
+  // -- One-shot handlers ------------------------------------------------------
   const handleOneShotStart = useCallback(async () => {
     if (oneShotPhase === 'speaking' && voiceSettings.interruptEnabled) {
       audioRef.current?.pause();
@@ -408,12 +406,12 @@ export function AuraVoiceCore({
   const handleOneShotStop = useCallback(async () => {
     if (oneShotPhase !== 'recording' || runningRef.current) return;
     const elapsed = recordStartRef.current ? Date.now() - recordStartRef.current : 0;
-    if (elapsed < 400) { notifyVoiceError('Hold Speak a moment — say your message first.'); return; }
+    if (elapsed < 400) { notifyVoiceError('Hold Speak a moment - say your message first.'); return; }
 
     if (voiceSettings.autoStopEnabled) {
       // Segmented path: stopSession() returns the assembled transcript
       setOneShotPhase('transcribing');
-      setLiveTranscriptOS({ user: '…', aura: '' });
+      setLiveTranscriptOS({ user: '...', aura: '' });
       const transcript = await segmentedOneShot.stopSession();
       if (!transcript) {
         notifyVoiceError('No speech detected. Try speaking closer to the microphone.');
@@ -466,7 +464,7 @@ export function AuraVoiceCore({
     };
   }, [oneShotPhase, handleOneShotStop]);
 
-  // ── Hotkey ─────────────────────────────────────────────────────────────────
+  // -- Hotkey -----------------------------------------------------------------
   const isProcessing = conversationModeEnabled
     ? (loop.loopPhase === 'transcribing' || loop.loopPhase === 'thinking')
     : (oneShotPhase === 'transcribing' || oneShotPhase === 'thinking');
@@ -495,7 +493,7 @@ export function AuraVoiceCore({
     setCurrentAudioUrl(null); setOneShotPhase('idle'); runningRef.current = false;
   }, [currentAudioUrl]);
 
-  // ── Approval data ──────────────────────────────────────────────────────────
+  // -- Approval data ----------------------------------------------------------
   const allApprovals       = runtime.pendingApprovals;
   const pendingCount       = allApprovals.filter(a => a.status === 'pending').length;
   const activeTrayApproval = allApprovals.find(a => a.status === 'pending') ?? allApprovals.find(a => a.status !== 'pending');
@@ -506,7 +504,7 @@ export function AuraVoiceCore({
   const handleApprove = () => { if (activeTrayApproval) runtime.resolveApproval(activeTrayApproval.id, 'approved'); };
   const handleReject  = () => { if (activeTrayApproval) runtime.resolveApproval(activeTrayApproval.id, 'rejected'); };
 
-  // ── Derived state ──────────────────────────────────────────────────────────
+  // -- Derived state ----------------------------------------------------------
   const oneshotMicPermission = voiceSettings.autoStopEnabled ? segmentedOneShot.micPermission : oneshotRecorder.state.micPermission;
   const micDenied      = conversationModeEnabled ? loop.micPermission === 'denied'      : oneshotMicPermission === 'denied';
   const micUnsupported = conversationModeEnabled ? loop.micPermission === 'unsupported' : oneshotMicPermission === 'unsupported';
@@ -534,23 +532,23 @@ export function AuraVoiceCore({
     return 'idle';
   })();
 
-  // ── You row ────────────────────────────────────────────────────────────────
+  // -- You row ----------------------------------------------------------------
   const isListeningState = conversationModeEnabled ? loop.loopPhase === 'listening' : oneShotPhase === 'recording';
   const isConnecting     = conversationModeEnabled ? false : oneShotPhase === 'connecting';
 
   function youRowContent() {
-    if (isConnecting) return <span className="text-zinc-500 italic">Starting microphone…</span>;
+    if (isConnecting) return <span className="text-zinc-500 italic">Starting microphone...</span>;
     if (isListeningState) {
       const durationSec = (durationMs / 1000).toFixed(1);
       if (vadPhase === 'calibrating') return (
         <span className="flex items-center gap-1.5 text-zinc-500 italic">
-          <span className="w-2 h-2 rounded-full bg-zinc-500 animate-pulse shrink-0" />Calibrating mic…
+          <span className="w-2 h-2 rounded-full bg-zinc-500 animate-pulse shrink-0" />Calibrating mic...
         </span>
       );
       if (vadPhase === 'speech_detected') return (
         <span className="flex items-center gap-2 text-rose-400 font-medium">
           <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
-          Speaking…
+          Speaking...
           <span className="text-zinc-500 font-normal text-[10px]">{durationSec}s</span>
           <span className="flex-1 max-w-[60px] h-1 bg-zinc-800 rounded-full overflow-hidden">
             <span className="h-full bg-rose-500 rounded-full block transition-all duration-75" style={{ width: `${Math.round(micLevel * 100)}%` }} />
@@ -559,43 +557,43 @@ export function AuraVoiceCore({
       );
       if (vadPhase === 'silence_detected') return (
         <span className="flex items-center gap-1.5 text-amber-400 font-medium">
-          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />Pause detected…
+          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />Pause detected...
           <span className="text-zinc-500 font-normal text-[10px]">{durationSec}s</span>
         </span>
       );
       if (vadPhase === 'auto_stopping') return (
         <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />Processing…
+          <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />Processing...
         </span>
       );
-      const hint = conversationModeEnabled ? `Listening… ${durationSec}s` : `Recording… ${durationSec}s`;
+      const hint = conversationModeEnabled ? `Listening... ${durationSec}s` : `Recording... ${durationSec}s`;
       return (
         <span className="flex items-center gap-1.5 text-sky-400 font-medium">
           <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse shrink-0" />{hint}
         </span>
       );
     }
-    if (liveTranscript?.user && liveTranscript.user !== '…') {
+    if (liveTranscript?.user && liveTranscript.user !== '...') {
       return <span className="text-zinc-200">{liveTranscript.user}</span>;
     }
     if (conversationModeEnabled && loop.loopPhase === 'dormant') {
-      return <span className="text-zinc-500 italic flex items-center gap-1.5"><Moon className="w-3 h-3" />Dormant — speak to resume</span>;
+      return <span className="text-zinc-500 italic flex items-center gap-1.5"><Moon className="w-3 h-3" />Dormant - speak to resume</span>;
     }
     const hint = conversationModeEnabled
-      ? 'Start Conversation — AURA will keep listening after each response'
+      ? 'Start Conversation - AURA will keep listening after each response'
       : (voiceSettings.autoStopEnabled ? 'Press Speak or Ctrl+Shift+Space, talk, then pause' : 'Press Speak, talk, then click Finish');
     return <span className="text-zinc-600 italic">{hint}</span>;
   }
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  // --- Render ---------------------------------------------------------------
   return (
     <div className="relative flex flex-col h-full min-h-0 w-full bg-gradient-to-b from-zinc-950 via-zinc-950 to-indigo-950/10 overflow-hidden">
       <NotificationToast position="top-right" maxVisible={3} />
 
-      {/* ── Status strip (Phase 3G: decluttered — orb-centric, minimal top) ── */}
+      {/* -- Status strip: orb-centric, minimal top -- */}
       <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-5 py-2.5 pointer-events-none">
         <div className="flex items-center gap-2 pointer-events-auto">
-          {/* Wake-phrase pill only when actively listening/activated — no static chips */}
+          {/* Wake-phrase pill only when actively listening/activated - no static chips */}
           {voiceSettings.wakePhrase && (wakePhrase.status === 'listening' || wakePhrase.status === 'activated') && (
             <div className={cn(
               'flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-semibold',
@@ -622,16 +620,16 @@ export function AuraVoiceCore({
         </div>
       </div>
 
-      {/* Mission box removed (Phase 3G UI cleanup) — project/mission state lives in Console → Memory. */}
+      {/* Mission state lives in Console and Memory. */}
 
-      {/* ── Orb + transcript (scrollable) ── */}
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col items-center px-4 pt-14 pb-0 gap-3">
-        <AuraVoiceVisualizer state={effectiveVis} source={conversationModeEnabled && loop.loopPhase === 'listening' ? 'admin' : (isVoiceActive ? 'aura' : 'aura')} size="xl" showLabel />
-        <AdminVoiceIndicator state={adminState} />
+      {/* -- Orb + transcript (scrollable) -- */}
+      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col items-center px-4 pt-16 pb-0 gap-3">
+        <AuraVoiceVisualizer state={effectiveVis} source={conversationModeEnabled && loop.loopPhase === 'listening' ? 'admin' : 'aura'} size="xl" showLabel />
+        {isVoiceActive && <AdminVoiceIndicator state={adminState} />}
 
         {/* Live transcript */}
-        {voiceSettings.enabled && (
-          <div className="w-full max-w-md bg-zinc-900/70 border border-zinc-800/60 rounded-xl px-4 py-3 space-y-2">
+        {voiceSettings.enabled && (liveTranscript || isVoiceActive || micDenied || micUnsupported) && (
+          <div className="w-full max-w-xl bg-zinc-950/70 border border-zinc-800/60 rounded-xl px-4 py-3 space-y-2 shadow-xl">
             <div className="flex items-start gap-2.5 min-h-[1.4rem]">
               <span className="text-sky-400 text-[11px] font-semibold shrink-0 mt-0.5 w-8">You</span>
               <span className="text-[12px] leading-relaxed flex-1">{youRowContent()}</span>
@@ -641,13 +639,13 @@ export function AuraVoiceCore({
               <span className="text-[12px] leading-relaxed flex-1">
                 {(() => {
                   const ph = conversationModeEnabled ? loop.loopPhase : oneShotPhase;
-                  if (ph === 'transcribing')    return <span className="text-violet-400 italic animate-pulse">Transcribing…</span>;
+                  if (ph === 'transcribing')    return <span className="text-violet-400 italic animate-pulse">Transcribing...</span>;
                   if (ph === 'acknowledging')   return <span className="text-amber-400 font-medium">{liveTranscript?.aura ?? 'Got it.'}</span>;
-                  if (ph === 'thinking')        return <span className="text-violet-400 italic animate-pulse">{liveTranscript?.user ? `"${liveTranscript.user.slice(0,50)}…" — thinking…` : 'Thinking…'}</span>;
-                  if (ph === 'preparing_voice') return <span className="text-sky-400 italic animate-pulse">Preparing voice…</span>;
-                  if (ph === 'speaking')        return <span className="text-indigo-300">{liveTranscript?.aura ?? '…'}</span>;
+                  if (ph === 'thinking')        return <span className="text-violet-400 italic animate-pulse">{liveTranscript?.user ? `"${liveTranscript.user.slice(0,50)}..." - thinking...` : 'Thinking...'}</span>;
+                  if (ph === 'preparing_voice') return <span className="text-sky-400 italic animate-pulse">Preparing voice...</span>;
+                  if (ph === 'speaking')        return <span className="text-indigo-300">{liveTranscript?.aura ?? '...'}</span>;
                   if (liveTranscript?.aura)     return <span className="text-zinc-300">{liveTranscript.aura}</span>;
-                  return <span className="text-zinc-600 italic">Response will appear here</span>;
+                  return <span className="text-zinc-600 italic">Ready when you speak</span>;
                 })()}
               </span>
             </div>
@@ -656,7 +654,7 @@ export function AuraVoiceCore({
             {(micDenied || micUnsupported) && (
               <div className="text-[11px] text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2.5 py-1.5 rounded-lg flex items-center gap-2">
                 <AlertTriangle className="w-3 h-3 shrink-0" />
-                {micDenied ? 'Mic permission denied — allow in Windows Privacy Settings.' : 'Microphone not supported in this environment.'}
+                {micDenied ? 'Mic permission denied - allow in Windows Privacy Settings.' : 'Microphone not supported in this environment.'}
               </div>
             )}
 
@@ -678,7 +676,7 @@ export function AuraVoiceCore({
                   <span className="w-1 h-1 rounded-full bg-zinc-600" />Auto-stop on pause
                 </span>
               )}
-              {/* Remember this — save last AURA response to memory */}
+              {/* Remember this - save last AURA response to memory */}
               {liveTranscript?.aura && loop.loopPhase !== 'listening' && loop.loopPhase !== 'idle' && (
                 <button
                   onClick={() => loop.rememberLastTurn(
@@ -707,46 +705,31 @@ export function AuraVoiceCore({
                     loop.lastLatencyMetrics.fullAudioReadyMs != null
                       ? `Full audio: ${loop.lastLatencyMetrics.fullAudioReadyMs}ms`
                       : null,
-                  ].filter(Boolean).join(' · ')}
+                  ].filter(Boolean).join(' / ')}
                 >
-                  ⏱ {loop.lastLatencyMetrics.firstAudioStartMs != null
+                  Time {loop.lastLatencyMetrics.firstAudioStartMs != null
                     ? `${loop.lastLatencyMetrics.firstAudioStartMs}ms first`
                     : `${loop.lastLatencyMetrics.perceivedLatencyMs}ms`}
                 </span>
               )}
               <span className="text-[10px] text-zinc-700 flex items-center gap-1 ml-auto">
-                <Keyboard className="w-2.5 h-2.5" />⌃⇧Space
+                <Keyboard className="w-2.5 h-2.5" />Ctrl+Shift+Space
               </span>
             </div>
           </div>
         )}
 
-        {/* Conversation history */}
-        {voiceSettings.enabled && turns.length > 1 && (
-          <div className="w-full max-w-md">
-            <button onClick={() => setConvOpen(p => !p)} className="w-full flex items-center justify-between px-3 py-1.5 bg-zinc-900/40 border border-zinc-800/40 rounded-xl text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors">
-              <span className="flex items-center gap-1.5"><Radio className="w-2.5 h-2.5" />History ({turns.length - 1} earlier)</span>
-              <div className="flex items-center gap-2">
-                <button onClick={(e) => { e.stopPropagation(); setTurns([]); openAIVoiceSessionService.clearHistory(); }} className="p-0.5 text-zinc-600 hover:text-rose-400" title="Clear">
-                  <Trash2 className="w-2.5 h-2.5" />
-                </button>
-                {convOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-              </div>
-            </button>
-            {convOpen && (
-              <div className="max-h-36 overflow-y-auto bg-zinc-950/80 border border-zinc-800/40 border-t-0 rounded-b-xl px-3 py-2 space-y-1.5">
-                {turns.slice(0, -1).map(turn => (
-                  <div key={turn.id} className="space-y-0.5">
-                    <p className="text-[10px] text-zinc-500"><span className="text-sky-400 font-semibold">You </span>{turn.userText}</p>
-                    <p className="text-[10px] text-zinc-400"><span className="text-indigo-400 font-semibold">AURA </span>{turn.auraText}</p>
-                  </div>
-                ))}
-              </div>
-            )}
+        {voiceSettings.enabled && turns.length > 0 && (
+          <p className="text-[10px] text-zinc-700">{turns.length} voice turn{turns.length === 1 ? '' : 's'} stored in Details.</p>
+        )}
+
+        {!voiceSettings.enabled && (
+          <div className="w-full max-w-md rounded-xl border border-zinc-800/50 bg-zinc-900/30 px-4 py-3 text-center text-[12px] text-zinc-600">
+            Voice is off. Enable it in Settings or use Console.
           </div>
         )}
 
-        <div className="shrink-0 h-28" aria-hidden />
+        <div className="shrink-0 h-24" aria-hidden />
       </div>
 
       {/* ApprovalTray */}
@@ -754,7 +737,7 @@ export function AuraVoiceCore({
         <ApprovalTray isOpen={isTrayOpen} onClose={() => setIsTrayOpen(false)} approval={activeTrayApproval} status={activeTrayApproval.status} onApprove={handleApprove} onReject={handleReject} onDetails={onOpenTechnicalDrawer} />
       )}
 
-      {/* ── Bottom controls (absolute, never overlaps content) ── */}
+      {/* -- Bottom controls (absolute, never overlaps content) -- */}
       <div className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">
         <div className="px-4 pt-2 pb-4 bg-gradient-to-t from-zinc-950/95 via-zinc-950/80 to-transparent pointer-events-auto">
           <div className="max-w-lg mx-auto flex flex-col gap-2">
@@ -769,7 +752,7 @@ export function AuraVoiceCore({
 
               {voiceSettings.enabled ? (
                 conversationModeEnabled ? (
-                  // ── Conversation mode controls ─────────────────────────────
+                  // -- Conversation mode controls -----------------------------
                   loop.loopPhase === 'idle' || loop.loopPhase === 'dormant' ? (
                     <button onClick={() => loop.startConversation()}
                       className="flex items-center gap-2 px-6 py-2.5 rounded-2xl font-semibold text-[14px] bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 transition-all">
@@ -801,11 +784,11 @@ export function AuraVoiceCore({
                   ) : (
                     <button disabled className="flex items-center gap-2 px-6 py-2.5 rounded-2xl font-semibold text-[14px] bg-indigo-600/40 text-white/50 cursor-not-allowed shadow-lg">
                       <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-                      {loopPhaseLabel_text || 'Processing…'}
+                      {loopPhaseLabel_text || 'Processing...'}
                     </button>
                   )
                 ) : (
-                  // ── One-shot controls ──────────────────────────────────────
+                  // -- One-shot controls --------------------------------------
                   oneShotPhase === 'speaking' ? (
                     <div className="flex items-center gap-2">
                       {voiceSettings.interruptEnabled && (
@@ -824,7 +807,7 @@ export function AuraVoiceCore({
                       className={cn('flex items-center gap-2 px-6 py-2.5 rounded-2xl font-semibold text-[14px] bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/30 shadow-lg transition-all',
                         !voiceSettings.autoStopEnabled && 'animate-pulse')}>
                       <Mic className="w-4 h-4" />
-                      {vadPhase === 'speech_detected' ? 'Speaking…' : vadPhase === 'silence_detected' ? 'Paused…' : 'Finish'}
+                      {vadPhase === 'speech_detected' ? 'Speaking...' : vadPhase === 'silence_detected' ? 'Paused...' : 'Finish'}
                     </button>
                   ) : (
                     <button onClick={handleOneShotStart}
@@ -862,17 +845,15 @@ export function AuraVoiceCore({
               </button>
             </div>
 
-            {/* Row 2: nav */}
-            <div className="flex items-center justify-center gap-1.5">
+            {/* Row 2: operator controls */}
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
               <button onClick={onOpenConsole} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium bg-zinc-900/60 border-zinc-700/50 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 hover:border-zinc-600 transition-colors">
                 <Terminal className="w-3 h-3" /> Console
-              </button>
-              <button onClick={onOpenAdminPanel} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium bg-zinc-900/60 border-zinc-700/50 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 hover:border-zinc-600 transition-colors">
-                <LayoutGrid className="w-3 h-3" /> Admin
               </button>
               <button onClick={onOpenTechnicalDrawer} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium bg-zinc-900/60 border-zinc-700/50 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 hover:border-zinc-600 transition-colors">
                 <Settings2 className="w-3 h-3" /> Details
               </button>
+              <PermissionModeSelector />
               <button
                 onClick={() => setVoiceSettings(s => ({ ...s, enabled: !s.enabled }))}
                 className={cn('flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold transition-all',
@@ -884,12 +865,7 @@ export function AuraVoiceCore({
                 title="Fast mode: 1-sentence reply first, then full answer"
                 className={cn('flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold transition-all',
                   voiceSettings.fastResponseMode ? 'bg-amber-500/20 border-amber-500/40 text-amber-300' : 'bg-zinc-900/60 border-zinc-700/40 text-zinc-500 hover:text-zinc-300')}>
-                ⚡ {voiceSettings.fastResponseMode ? 'Fast' : 'Std'}
-              </button>
-              <button onClick={() => runtime.toggleSafeMode()}
-                className={cn('flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-colors',
-                  runtime.isSafeMode ? 'bg-amber-500/15 border-amber-500/30 text-amber-400' : 'bg-zinc-900/60 border-zinc-700/50 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300')}>
-                <Eye className="w-3 h-3" /> Safe
+                <Zap className="w-2.5 h-2.5" />{voiceSettings.fastResponseMode ? 'Fast' : 'Std'}
               </button>
             </div>
           </div>

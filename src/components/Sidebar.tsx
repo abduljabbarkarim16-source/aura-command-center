@@ -81,12 +81,11 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
           </button>
         ) : (
           <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-3 flex flex-col gap-1.5">
-            <span className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">System Status</span>
-            <div className="flex items-center gap-2 text-xs font-medium text-emerald-400">
+            <span className="text-[11px] font-semibold tracking-wide text-zinc-500 uppercase">Operator</span>
+            <div className="flex items-center gap-2 text-xs font-medium text-zinc-400">
               <ShieldCheck className="w-3.5 h-3.5" />
               <span className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
-                Online & Monitoring
+                Local desktop shell
               </span>
             </div>
           </div>

@@ -112,7 +112,7 @@ export function Dashboard() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse flex-shrink-0" />
-                <span className="text-[11px] font-semibold text-indigo-400 uppercase tracking-widest">Phase 3G · Internal Agent OS</span>
+                <span className="text-[11px] font-semibold text-indigo-400 uppercase tracking-widest">Phase 3J - Operator UI</span>
               </div>
               <h3 className="text-[16px] font-semibold text-zinc-100 leading-snug">
                 {activeProj.name}

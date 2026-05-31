@@ -1,5 +1,5 @@
 /**
- * VoiceReadinessCard — Phase 3D
+ * VoiceReadinessCard - Phase 3D
  *
  * Settings panel for voice configuration.
  * Phase 3D additions:
@@ -62,52 +62,52 @@ export function VoiceReadinessCard() {
       label: 'OpenAI API Key',
       status: snap.openaiKeyPresent ? 'ok' : 'missing',
       detail: snap.openaiKeyPresent
-        ? 'Present — STT (Whisper) + Chat + TTS enabled via Tauri backend'
+        ? 'Present - STT (Whisper) + Chat + TTS enabled via Tauri backend'
         : 'Not configured - save an OpenAI key in Settings or add VITE_OPENAI_API_KEY to .env',
     },
     {
       label: 'STT Provider',
       status: snap.sttReady ? 'ok' : 'warn',
-      detail: `${snap.sttProvider} · ${snap.sttReady ? 'Ready' : 'Browser fallback'}`,
+      detail: `${snap.sttProvider} / ${snap.sttReady ? 'Ready' : 'Browser fallback'}`,
     },
     {
       label: 'TTS Provider',
       status: snap.ttsReady ? 'ok' : 'warn',
-      detail: `${snap.ttsProvider} · ${snap.ttsReady ? 'Ready' : 'Browser fallback'}`,
+      detail: `${snap.ttsProvider} / ${snap.ttsReady ? 'Ready' : 'Browser fallback'}`,
     },
     {
       label: 'Chat Provider',
       status: snap.openaiKeyPresent ? 'ok' : 'missing',
       detail: snap.openaiKeyPresent
-        ? 'OpenAI gpt-4o-mini · max 300 tokens · via Tauri · response style: ' + settings.responseStyle
+        ? 'OpenAI gpt-4o-mini / max 300 tokens / via Tauri / response style: ' + settings.responseStyle
         : 'Requires OpenAI key',
     },
     {
       label: 'ElevenLabs (optional)',
       status: snap.elevenLabsKeyPresent ? 'ok' : 'warn',
-      detail: snap.elevenLabsKeyPresent ? 'Key present — premium TTS available' : 'Not configured — optional',
+      detail: snap.elevenLabsKeyPresent ? 'Key present - premium TTS available' : 'Not configured - optional',
     },
     {
       label: 'Realtime Voice',
       status: 'warn',
-      detail: 'Planned Phase 3E+ — requires Tauri backend bridge for ephemeral token minting',
+      detail: 'Planned - requires Tauri backend bridge for ephemeral token minting',
     },
     {
       label: 'Microphone',
       status: snap.microphonePermission === 'granted' ? 'ok'
         : snap.microphonePermission === 'denied' ? 'missing' : 'warn',
       detail: snap.microphonePermission === 'not_requested'
-        ? 'Not requested — will ask when user clicks Speak'
+        ? 'Not requested - will ask when user clicks Speak'
         : snap.microphonePermission === 'granted' ? 'Permission granted'
-        : snap.microphonePermission === 'denied' ? 'Denied — allow in browser/system settings'
+        : snap.microphonePermission === 'denied' ? 'Denied - allow in browser/system settings'
         : snap.microphonePermission,
     },
     {
       label: 'Live Voice',
       status: settings.enabled ? 'ok' : 'locked',
       detail: settings.enabled
-        ? 'Enabled — Speak button activates real recording → STT → Chat → TTS'
-        : 'Disabled — toggle below to enable',
+        ? 'Enabled - Speak button activates real recording -> STT -> Chat -> TTS'
+        : 'Disabled - toggle below to enable',
     },
   ];
 
@@ -172,7 +172,7 @@ export function VoiceReadinessCard() {
           <div>
             <h3 className="text-[14px] font-semibold text-zinc-200">Voice Readiness</h3>
             <p className="text-[11px] text-zinc-500 mt-0.5">
-              Phase 3D — VAD-lite, barge-in, wake phrase, response style
+              Request-based OpenAI voice, VAD-lite, barge-in, wake phrase, response style
             </p>
           </div>
         </div>
@@ -226,7 +226,7 @@ export function VoiceReadinessCard() {
             onChange={v => updateSettings({ autoStopEnabled: v })}
           />
 
-          {/* Silence threshold — only shown when auto-stop is on */}
+          {/* Silence threshold - only shown when auto-stop is on */}
           {(settings.autoStopEnabled ?? true) && (
             <SelectRow
               label="Silence threshold"
@@ -261,7 +261,7 @@ export function VoiceReadinessCard() {
             onChange={v => updateSettings({ interruptEnabled: v })}
           />
 
-          {/* Wake phrase — with amber warning */}
+          {/* Wake phrase - with amber warning */}
           <div className="px-5 py-3 border-b border-zinc-800/30">
             <div className="flex items-center justify-between">
               <div>

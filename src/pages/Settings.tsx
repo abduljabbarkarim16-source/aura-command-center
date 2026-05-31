@@ -294,13 +294,13 @@ function ChangelogPanel() {
               <div className="flex items-center gap-2 mb-1.5">
                 <span className="text-[11px] font-mono text-indigo-400">v{entry.version}</span>
                 <span className="text-xs font-semibold text-zinc-300">{entry.phase}</span>
-                <span className="text-xs text-zinc-500">— {entry.summary}</span>
+                <span className="text-xs text-zinc-500">- {entry.summary}</span>
                 <span className="ml-auto text-[10px] text-zinc-600">{entry.date}</span>
               </div>
               <ul className="space-y-0.5 pl-3">
                 {entry.highlights.map((h, i) => (
                   <li key={i} className="text-[11px] text-zinc-500 flex items-start gap-1.5">
-                    <span className="text-indigo-500 mt-0.5">·</span>{h}
+                    <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-indigo-500" />{h}
                   </li>
                 ))}
               </ul>
@@ -356,13 +356,13 @@ export function Settings() {
 
   async function handleClearMemory() {
     await settingsService.clearMemoryEntries();
-    showToast('Mock memory cleared');
+    showToast('Memory cleared');
   }
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64 text-zinc-500 text-sm">
-        Loading settings…
+        Loading settings...
       </div>
     );
   }
@@ -379,7 +379,7 @@ export function Settings() {
           <span className="text-xs font-semibold text-indigo-400 border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1 rounded-full">
             {VERSION_DISPLAY}
           </span>
-          <span className="text-[10px] text-zinc-600">{APP_PHASE_LABEL} · {BUILD_DATE}</span>
+          <span className="text-[10px] text-zinc-600">{APP_PHASE_LABEL} / {BUILD_DATE}</span>
         </div>
       </div>
 
@@ -428,8 +428,8 @@ export function Settings() {
           label="Routing Mode"
           value={settings.routingMode}
           options={[
-            { value: 'manual', label: 'Manual — you choose the agent per request' },
-            { value: 'automatic', label: 'Automatic — AURA router selects agent (mock)' },
+            { value: 'manual', label: 'Manual - you choose the agent per request' },
+            { value: 'automatic', label: 'Automatic - planned AURA router preview' },
           ]}
           onChange={routingMode => handleUpdate({ routingMode })}
         />
@@ -480,19 +480,18 @@ export function Settings() {
           onChange={assistantMuted => handleUpdate({ assistantMuted })}
         />
 
-        {/* Voice Runtime info card — Phase 2F */}
+        {/* Voice Runtime info card */}
         <div className="mx-5 mb-5 mt-1 p-3 rounded-lg border border-zinc-800/60 bg-zinc-900/40 flex items-start gap-3">
           <Cpu className="w-4 h-4 text-indigo-400 mt-0.5 shrink-0" />
           <div>
             <p className="text-xs font-semibold text-zinc-300 mb-0.5">
-              Voice Runtime — Mock Mode
+              Voice Runtime - Request-Based
             </p>
             <p className="text-[11px] text-zinc-500 leading-relaxed">
-              Phase 2F: All voice state is managed by the local VoiceRuntimeService.
-              No microphone access, no API calls. Real STT/TTS integration lands in Phase 3.
+              Voice Core records only after the user starts a voice action. STT, chat, and TTS run through the Tauri backend when an OpenAI key is configured.
             </p>
             <p className="text-[11px] text-indigo-400/80 mt-1 font-medium">
-              Mode: mock · Source: local event bus
+              Mode: request-based - Source: Tauri voice commands
             </p>
           </div>
         </div>
@@ -547,7 +546,7 @@ export function Settings() {
       <CollapsibleSection
         icon={<FolderCog className="w-5 h-5" />}
         title="Desktop Paths"
-        subtitle="Placeholders — real path access requires Tauri filesystem permission grant"
+        subtitle="Placeholders - real path access requires Tauri filesystem permission grant"
       >
         <TextField
           label="Local Workspace Root"
@@ -582,8 +581,7 @@ export function Settings() {
           ))}
         </div>
         <div className="mt-2 p-3 bg-amber-500/5 border border-amber-500/20 rounded-lg text-xs text-amber-400/80">
-          Provider toggles are saved locally. API keys require secure storage configuration.
-          Key values are never written to local storage.
+          Provider toggles are saved locally. Current desktop API-key storage uses the local AppData .env file, not browser localStorage or OS keychain.
         </div>
       </CollapsibleSection>
 

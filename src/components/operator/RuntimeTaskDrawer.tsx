@@ -5,6 +5,13 @@ import { runtimeTaskService, type RuntimeTaskEvent } from '../../services/runtim
 import type { RuntimeTask } from '../../types/runtime-task';
 import clsx from 'clsx';
 
+function formatElapsed(ms?: number): string {
+  if (ms == null) return '';
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.round(ms / 60_000)}m`;
+}
+
 export function RuntimeTaskDrawer() {
   const [activeTask, setActiveTask] = useState<RuntimeTask | null>(null);
   const [isPinned, setIsPinned] = useState(false);
@@ -92,7 +99,7 @@ export function RuntimeTaskDrawer() {
           animate={{ x: 0, opacity: 1 }}
           exit={{ x: 300, opacity: 0 }}
           transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-          className="fixed bottom-6 right-6 w-80 bg-zinc-900 border border-zinc-800 rounded-lg shadow-2xl overflow-hidden z-50 flex flex-col"
+          className="fixed bottom-24 right-4 z-50 flex w-[calc(100vw-2rem)] max-w-80 flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900 shadow-2xl xl:right-[372px]"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-3 py-2 bg-zinc-950/50 border-b border-zinc-800/60">
@@ -109,7 +116,7 @@ export function RuntimeTaskDrawer() {
               <div className="flex flex-col truncate">
                 <span className="text-[12px] font-semibold text-zinc-200 truncate">{activeTask.title}</span>
                 <span className="text-[10px] text-zinc-500 font-mono">
-                  {activeTask.status} {activeTask.elapsedMs ? `(${activeTask.elapsedMs}ms)` : ''}
+                  {activeTask.status} {activeTask.elapsedMs ? `(${formatElapsed(activeTask.elapsedMs)})` : ''}
                 </span>
               </div>
             </div>

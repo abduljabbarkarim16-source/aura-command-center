@@ -1,12 +1,12 @@
 /**
- * Console — AURA Phase 3G
+ * Console - AURA Phase 3J operator surface
  *
  * AURA opens directly into Voice Core. From there the operator can switch to
- * the Console — a live, testable command surface (no mock data).
+ * the Console - a live, testable command surface (no mock data).
  *
  * Modes:
- *   voiceCore    → AuraVoiceCore (default, shown immediately on load)
- *   chatConsole  → AuraCommandConsole (live tool dispatch + right panel)
+ *   voiceCore    -> AuraVoiceCore (default, shown immediately on load)
+ *   chatConsole  -> AuraCommandConsole (live tool dispatch + right panel)
  */
 
 import { useState } from 'react';
@@ -15,6 +15,7 @@ import { AuraVoiceCore }        from '../components/operator/AuraVoiceCore';
 import { AdminPanelOverlay }    from '../components/operator/AdminPanelOverlay';
 import { TechnicalDrawer }      from '../components/operator/TechnicalDrawer';
 import { AuraCommandConsole }   from '../components/operator/AuraCommandConsole';
+import { OperatorRightPanel }   from '../components/operator/OperatorRightPanel';
 
 import type { VisualizerState } from '../components/operator/AuraVoiceVisualizer';
 
@@ -30,12 +31,16 @@ export function Console() {
   if (mode === 'voiceCore') {
     return (
       <div className="flex h-full min-h-0 w-full overflow-hidden bg-zinc-950">
-        <AuraVoiceCore
-          auraState={_auraState}
-          onOpenConsole={() => setMode('chatConsole')}
-          onOpenAdminPanel={() => setIsAdminOpen(true)}
-          onOpenTechnicalDrawer={() => { setIsAdminOpen(false); setIsDrawerOpen(true); }}
-        />
+        <div className="min-w-0 flex-1">
+          <AuraVoiceCore
+            auraState={_auraState}
+            onOpenConsole={() => setMode('chatConsole')}
+            onOpenTechnicalDrawer={() => { setIsAdminOpen(false); setIsDrawerOpen(true); }}
+          />
+        </div>
+        <div className="relative hidden shrink-0 xl:flex">
+          <OperatorRightPanel width={320} defaultOpen={true} />
+        </div>
         <AdminPanelOverlay
           isOpen={isAdminOpen}
           onClose={() => setIsAdminOpen(false)}
@@ -48,11 +53,16 @@ export function Console() {
 
   return (
     <div className="flex h-full min-h-0 w-full overflow-hidden bg-zinc-950">
-      <AuraCommandConsole
-        onBack={() => setMode('voiceCore')}
-        onOpenAdmin={() => setIsAdminOpen(true)}
-        onOpenDetails={() => { setIsAdminOpen(false); setIsDrawerOpen(true); }}
-      />
+      <div className="min-w-0 flex-1">
+        <AuraCommandConsole
+          onBack={() => setMode('voiceCore')}
+          onOpenAdmin={() => setIsAdminOpen(true)}
+          onOpenDetails={() => { setIsAdminOpen(false); setIsDrawerOpen(true); }}
+        />
+      </div>
+      <div className="relative hidden shrink-0 xl:flex">
+        <OperatorRightPanel width={320} defaultOpen={true} />
+      </div>
       <AdminPanelOverlay
         isOpen={isAdminOpen}
         onClose={() => setIsAdminOpen(false)}

@@ -24,7 +24,7 @@ import { DataSourceNotice } from '../common/DataSourceNotice';
 // ─── Mock data ────────────────────────────────────────────────────────────────
 
 const MOCK_PROJECTS = [
-  { id: 'p1', name: 'AURA Phase 3G — Internal Agent OS', status: 'active', progress: 90, agent: 'AURA' },
+  { id: 'p1', name: 'AURA Phase 3J - Operator UI', status: 'active', progress: 90, agent: 'AURA' },
   { id: 'p2', name: 'Agent bridges',     status: 'active',    progress: 80, agent: 'AURA' },
   { id: 'p3', name: 'Capability registry', status: 'completed', progress: 100, agent: 'AURA' },
 ];
