@@ -24,6 +24,7 @@ import { toolRegistryService } from '../../services/tools/ToolRegistryService';
 import type { ToolExecution } from '../../types/tools';
 import { CapabilitiesPanel } from './CapabilitiesPanel';
 import { MemoryPanel } from './MemoryPanel';
+import { AgentBridgesPanel } from './AgentBridgesPanel';
 
 // ─── Quick test prompts (compact, not oversized pills) ─────────────────────────
 
@@ -142,7 +143,7 @@ interface AuraCommandConsoleProps {
   onOpenDetails: () => void;
 }
 
-type RightTab = 'activity' | 'capabilities' | 'memory';
+type RightTab = 'activity' | 'bridges' | 'capabilities' | 'memory';
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -249,7 +250,8 @@ export function AuraCommandConsole({ onBack, onOpenAdmin, onOpenDetails }: AuraC
           <div className="shrink-0 flex items-center border-b border-zinc-800/60">
             {([
               { id: 'activity' as const, label: 'Activity', icon: <Wrench className="w-3 h-3" /> },
-              { id: 'capabilities' as const, label: 'Capabilities', icon: <ShieldCheck className="w-3 h-3" /> },
+              { id: 'bridges' as const, label: 'Bridges', icon: <Bot className="w-3 h-3" /> },
+              { id: 'capabilities' as const, label: 'Caps', icon: <ShieldCheck className="w-3 h-3" /> },
               { id: 'memory' as const, label: 'Memory', icon: <Brain className="w-3 h-3" /> },
             ]).map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
@@ -261,6 +263,7 @@ export function AuraCommandConsole({ onBack, onOpenAdmin, onOpenDetails }: AuraC
           </div>
           <div className="flex-1 min-h-0">
             {tab === 'activity' && <ToolActivity />}
+            {tab === 'bridges' && <AgentBridgesPanel />}
             {tab === 'capabilities' && <CapabilitiesPanel />}
             {tab === 'memory' && <MemoryPanel />}
           </div>
