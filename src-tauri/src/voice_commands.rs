@@ -211,10 +211,15 @@ pub async fn openai_transcribe_audio(
     // verbose_json gives us no_speech_prob per segment.
     // temperature=0 is deterministic — much less likely to hallucinate.
     // language=en avoids cross-language drift on noisy input.
+    // gpt-4o-transcribe only accepts "json" or "text" — not "verbose_json".
+    // whisper-1 accepts verbose_json (gives per-segment no_speech_prob).
+    // We detect which format to use based on the model name.
+    let response_fmt = if STT_MODEL.starts_with("gpt-4o") { "json" } else { "verbose_json" };
+
     let mut form = reqwest::multipart::Form::new()
         .part("file", file_part)
         .text("model", STT_MODEL)
-        .text("response_format", "verbose_json")
+        .text("response_format", response_fmt)
         .text("temperature", "0")
         .text("language", "en");
 
