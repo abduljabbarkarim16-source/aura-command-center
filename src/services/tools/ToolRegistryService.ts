@@ -16,6 +16,8 @@ import type { ToolDefinition, ToolExecution } from '../../types/tools';
 import { cliSessionService } from '../agents/CliSessionService';
 import { cliDiscoveryService } from '../agents/CliDiscoveryService';
 import { permissionModeService } from '../permissions/PermissionModeService';
+import { runtimeTaskService } from '../runtime/RuntimeTaskService';
+import type { RuntimeTaskType, RuntimeTask } from '../../types/runtime-task';
 
 function uid(): string {
   return `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -259,7 +261,7 @@ class ToolRegistryServiceImpl {
   async execute(
     toolId: string,
     inputs: Record<string, string> = {},
-    options: { approved?: boolean } = {},
+    options: { approved?: boolean; taskId?: string } = {},
   ): Promise<ToolExecution> {
     const tool = this.getTool(toolId);
     if (!tool) throw new Error(`Unknown tool: ${toolId}`);
@@ -300,9 +302,41 @@ class ToolRegistryServiceImpl {
     this.executions = [execution, ...this.executions].slice(0, 100);
     this.notify();
 
+    let runtimeTask: RuntimeTask;
+    if (options.taskId) {
+      const existing = runtimeTaskService.getTask(options.taskId);
+      if (!existing) throw new Error(`Task ID not found: ${options.taskId}`);
+      runtimeTask = existing;
+    } else {
+      let taskType: RuntimeTaskType = 'system';
+      if (tool.category === 'terminal') taskType = 'terminal';
+      else if (tool.category === 'cli_agent') taskType = 'cli';
+      else if (tool.category === 'memory') taskType = 'memory';
+      else if (tool.category === 'capability') taskType = 'capability';
+
+      runtimeTask = runtimeTaskService.createTask({
+        title: `Tool: ${tool.name}`,
+        type: taskType,
+        source: 'agent',
+        risk: tool.risk,
+        toolId: toolId
+      });
+    }
+    
+    runtimeTaskService.startTask(runtimeTask.id);
+    
+    const inputStr = Object.keys(inputs).length > 0 
+      ? JSON.stringify(inputs) 
+      : 'no inputs';
+    runtimeTaskService.appendLog(runtimeTask.id, `Started ${toolId} with ${inputStr}`);
+
     try {
       const result = await this.runTool(tool, inputs);
       const end = new Date().toISOString();
+      
+      const successMessage = `Completed with exit code ${result.exitCode}. Output: ${result.output.slice(0, 100)}...`;
+      runtimeTaskService.appendLog(runtimeTask.id, successMessage, result.exitCode === 0 ? 'success' : 'warn');
+
       const done: Partial<ToolExecution> = {
         status: 'completed',
         output: result.output,
@@ -312,14 +346,36 @@ class ToolRegistryServiceImpl {
       };
       if (result.exitCode !== 0) done.status = 'error';
       this.updateExecution(execId, done);
+      
+      if (result.exitCode === 0) {
+        // Tag tasks that update memory
+        const memoryWriteTools = ['memory.rememberFact', 'memory.setUserName', 'memory.updatePreference', 'memory.deleteMemoryItem'];
+        if (memoryWriteTools.includes(tool.id)) {
+          const t = runtimeTaskService.getTask(runtimeTask.id);
+          if (t) {
+            t.updatedMemory = true;
+          }
+        }
+        
+        runtimeTaskService.completeTask(runtimeTask.id, { output: result.output, exitCode: result.exitCode }, `Exit code: ${result.exitCode}`);
+      } else {
+        runtimeTaskService.failTask(runtimeTask.id, `Exit code ${result.exitCode}: ${result.output.slice(0, 200)}`);
+      }
+      
       return { ...execution, ...done };
     } catch (err) {
+      const errMsg = String(err);
+      runtimeTaskService.appendLog(runtimeTask.id, `Error: ${errMsg}`, 'error');
+      
       this.updateExecution(execId, {
         status: 'error',
-        errorSummary: String(err),
+        errorSummary: errMsg,
         endedAt: new Date().toISOString(),
       });
-      return { ...execution, status: 'error', errorSummary: String(err) };
+      
+      runtimeTaskService.failTask(runtimeTask.id, errMsg);
+      
+      return { ...execution, status: 'error', errorSummary: errMsg };
     }
   }
 

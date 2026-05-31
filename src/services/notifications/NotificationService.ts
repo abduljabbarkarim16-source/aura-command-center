@@ -18,6 +18,11 @@ export type ExtendedNotificationType =
   | 'error'
   | 'approval_required'
   | 'task_update'
+  | 'task_started'
+  | 'task_completed'
+  | 'task_failed'
+  | 'task_blocked'
+  | 'usage_limit_detected'
   | 'voice_event';
 
 type Listener = (notifications: AuraNotification[]) => void;
@@ -115,6 +120,11 @@ class NotificationService {
       error:             'danger',
       approval_required: 'approval',
       task_update:       'tool',
+      task_started:      'info',
+      task_completed:    'success',
+      task_failed:       'danger',
+      task_blocked:      'warning',
+      usage_limit_detected: 'warning',
       voice_event:       'relay',
     };
     return (map[t] ?? t) as NotificationType;

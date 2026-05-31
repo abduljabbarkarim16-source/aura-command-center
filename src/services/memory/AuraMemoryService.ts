@@ -86,7 +86,7 @@ class AuraMemoryServiceImpl {
       id:         uid(),
       category:   data.category,
       source:     data.source,
-      status:     data.source === 'explicit' ? 'pinned' : 'active',
+      status:     (data.source === 'explicit' || data.source === 'mistake_correction') ? 'pinned' : 'active',
       content,
       context:    data.context?.slice(0, 300),
       createdAt:  now,

@@ -17,6 +17,8 @@ import { capabilityMemoryService } from '../memory/CapabilityMemoryService';
 import { sessionThreadService } from '../session/SessionThreadService';
 import { agentBridgeService } from '../agents/AgentBridgeService';
 import { notificationService } from '../notifications/NotificationService';
+import { recipeLearningService } from '../recipes/RecipeLearningService';
+import { cheapFirstRouterService } from '../routing/CheapFirstRouterService';
 
 const DOCS = 'docs/phase-3g-internal-agent-os.md';
 const STORAGE_KEY = 'aura.selfTest.lastRun';
@@ -136,6 +138,20 @@ class AuraSelfTestServiceImpl {
           sessionThreadService.recordTurn('self-test', 'self-test ok');
           const after = sessionThreadService.getActive()?.messageCount ?? before;
           return { ok: after > before, detail: `Thread messages ${before} -> ${after}.` };
+        },
+      },
+      {
+        id: 'recipes', name: 'Recipe learning service',
+        run: async () => {
+          const recipes = recipeLearningService.getAllRecipes();
+          return { ok: Array.isArray(recipes), detail: `Recipes loaded: ${recipes.length}` };
+        },
+      },
+      {
+        id: 'routing', name: 'Cheap-first routing',
+        run: async () => {
+          const target = await cheapFirstRouterService.routeTask('test task', 'simple');
+          return { ok: !!target.type, detail: `Simple task routes to: ${target.type}` };
         },
       },
     ];

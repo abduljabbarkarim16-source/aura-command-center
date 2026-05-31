@@ -13,6 +13,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type { AgentSession, AgentCLI, AgentSessionStatus } from '../../types/agent-session';
+import { runtimeTaskService } from '../runtime/RuntimeTaskService';
 
 const MAX_OUTPUT_LINES = 500;
 const MAX_CONCURRENT   = 2;
@@ -82,6 +83,16 @@ class CliSessionServiceImpl {
     this.sessions = [session, ...this.sessions].slice(0, 50);
     this.notify();
 
+    // Create a corresponding RuntimeTask
+    const task = runtimeTaskService.createTask({
+      title: `${cli === 'claude' ? 'Claude' : 'Codex'} CLI Session`,
+      type: 'cli',
+      source: 'agent',
+      risk: 'medium',
+    });
+    runtimeTaskService.startTask(task.id);
+    runtimeTaskService.appendLog(task.id, `Prompt: ${prompt}`);
+
     // Spawn via Rust (non-blocking — invoke awaits until process completes)
     try {
       const result = await invoke<RustSessionResult>('spawn_agent_session', {
@@ -94,6 +105,10 @@ class CliSessionServiceImpl {
         ...result.stdout.split('\n').filter(Boolean),
         ...result.stderr.split('\n').filter(Boolean),
       ].slice(0, MAX_OUTPUT_LINES);
+      
+      if (lines.length > 0) {
+        runtimeTaskService.appendLog(task.id, lines.join('\n').slice(0, 200) + (lines.join('\n').length > 200 ? '...' : ''), result.success ? 'success' : 'warn');
+      }
 
       let status: AgentSessionStatus = result.success ? 'completed' : 'error';
       if (result.timedOut) status = 'error';
@@ -107,12 +122,21 @@ class CliSessionServiceImpl {
         errorSummary: result.error ?? (result.timedOut ? 'Session timed out after 60s' : undefined),
         usageLimitMessage: result.usageLimitMessage,
       });
+      
+      if (status === 'completed') {
+        runtimeTaskService.completeTask(task.id, result, 'Completed successfully');
+      } else {
+        runtimeTaskService.failTask(task.id, result.error ?? result.usageLimitMessage ?? 'Session failed');
+      }
     } catch (err) {
       this.update(id, {
         status: 'error',
         endedAt: new Date().toISOString(),
         errorSummary: String(err),
       });
+      
+      runtimeTaskService.appendLog(task.id, String(err), 'error');
+      runtimeTaskService.failTask(task.id, String(err));
     }
 
     return id;

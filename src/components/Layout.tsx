@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { CommandPalette } from './operator/CommandPalette';
 import { OperatorRightPanel } from './operator/OperatorRightPanel';
+import { RuntimeTaskDrawer } from './operator/RuntimeTaskDrawer';
 
 export function Layout() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
@@ -29,6 +30,9 @@ export function Layout() {
           </div>
         </div>
       </div>
+      
+      {/* Global runtime components */}
+      <RuntimeTaskDrawer />
     </div>
   );
 }
