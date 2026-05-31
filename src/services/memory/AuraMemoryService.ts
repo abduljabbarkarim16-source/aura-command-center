@@ -16,7 +16,7 @@ import { persistentStore } from '../storage/PersistentStoreService';
 
 const STORAGE_KEY  = 'aura.memory.store';
 const MAX_MEMORIES = 150;
-const MAX_INJECT   = 8;
+const MAX_INJECT   = 20; // Phase 3K audit: raised from 8 — model sees more context per turn
 
 type MemoryListener = (memories: AuraMemory[]) => void;
 

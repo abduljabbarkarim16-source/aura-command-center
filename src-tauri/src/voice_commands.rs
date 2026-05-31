@@ -29,13 +29,17 @@ const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024; // 25 MB — Whisper API actual
 const MIN_AUDIO_BYTES: usize = 3_000;
 const MAX_TEXT_LEN: usize = 4096;
 const MAX_SYSTEM_PROMPT_LEN: usize = 8_000;
-const MAX_RESPONSE_TOKENS: u32 = 300; // Phase 3D: raised from 150 to support detailed responses
+const MAX_RESPONSE_TOKENS: u32 = 1_000; // Phase 3K audit: raised from 300 — stop cutting off answers
 /// Ultra-low token budget for fast acknowledgement reply (1 sentence, ≤12 words).
 /// Cuts chat generation time from ~800-2000ms to ~200-500ms for the first spoken reply.
 const MAX_FAST_TOKENS: u32 = 40;
-const CHAT_MODEL: &str = "gpt-4o-mini";
-const TTS_MODEL: &str = "tts-1";
-const STT_MODEL: &str = "whisper-1";
+// Phase 3K model audit — upgraded from weaker defaults:
+//   whisper-1 → gpt-4o-transcribe: dramatically better on proper nouns and names
+//   gpt-4o-mini → gpt-4o: reliable tool calling, proper reasoning, doesn't fake actions
+//   tts-1 → tts-1-hd: better voice quality (ElevenLabs activates via VITE_ELEVENLABS_API_KEY)
+const CHAT_MODEL: &str = "gpt-4o";
+const TTS_MODEL: &str = "tts-1-hd";
+const STT_MODEL: &str = "gpt-4o-transcribe";
 
 /// Known Whisper hallucination substrings. Whisper was trained on YouTube videos and
 /// podcasts; when given silence or very low-energy audio it frequently hallucinates these.
