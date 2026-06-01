@@ -26,9 +26,10 @@ import {
 import { auraMemoryService } from '../../services/memory/AuraMemoryService';
 import { auraPersonalityService } from '../../services/personality/AuraPersonalityService';
 import { cn } from '../../lib/utils';
-import { AuraVoiceVisualizer } from './AuraVoiceVisualizer';
 import type { VisualizerState } from './AuraVoiceVisualizer';
-import { LiveCanvas, type CanvasMode } from './LiveCanvas';
+import { AuraLiveCanvas } from '../visual/AuraLiveCanvas';
+import { AuraOrbVisualizer } from '../visual/AuraOrbVisualizer';
+import { AuraTerminalOverlay } from '../visual/AuraTerminalOverlay';
 import { AdminVoiceIndicator } from './AdminVoiceIndicator';
 import type { AdminVoiceState } from './AdminVoiceIndicator';
 import { ApprovalTray } from './ApprovalTray';
@@ -42,12 +43,15 @@ import { useSegmentedVoiceSession } from '../../hooks/useSegmentedVoiceSession';
 import { useWakePhrase, DEFAULT_WAKE_PHRASES } from '../../hooks/useWakePhrase';
 import { useVoiceHotkey } from '../../hooks/useVoiceHotkey';
 import { useConversationLoop } from '../../hooks/useConversationLoop';
+import { useVisualShellState } from '../../hooks/useVisualShellState';
 import { openAIVoiceSessionService } from '../../services/voice/OpenAIVoiceSessionService';
+import { visualShellStateService } from '../../services/visual/VisualShellStateService';
 import { notifyVoiceError, notifyVoiceSuccess } from '../../services/notifications/NotificationService';
 import { voiceTranscriptLogService } from '../../services/voice/VoiceTranscriptLogService';
 import type { VoiceRuntimeState } from '../../types/voice-runtime';
 import type { VoiceConversationTurn, VoiceConversationSettings } from '../../types/voice-session';
 import { DEFAULT_VOICE_SETTINGS } from '../../types/voice-session';
+import type { CanvasMode } from '../../types/visual-canvas';
 
 // --- Constants ----------------------------------------------------------------
 
@@ -526,14 +530,20 @@ export function AuraVoiceCore({
     ? effectivePhaseForVisualizer
     : RUNTIME_TO_VISUALIZER[runtime.state] ?? 'idle';
 
-  // Map the visualizer state to the LiveCanvas mode (Layer 2).
-  const canvasMode: CanvasMode =
+  // Map the voice/runtime state into the visual shell's voice layer.
+  const voiceCanvasMode: CanvasMode =
     effectiveVis === 'executing' || effectiveVis === 'waiting_for_approval' ? 'working'
       : effectiveVis === 'listening' ? 'listening'
         : effectiveVis === 'thinking' ? 'thinking'
           : effectiveVis === 'speaking' ? 'speaking'
-            : effectiveVis === 'error' ? 'ambient'
+            : effectiveVis === 'error' ? 'failed'
               : 'ambient';
+
+  const visualShell = useVisualShellState({
+    voiceMode: voiceCanvasMode,
+    micLevel,
+    audioAmplitude: micLevel,
+  });
 
   const adminState: AdminVoiceState = (() => {
     if (runtime.isMuted) return 'muted';
@@ -598,12 +608,16 @@ export function AuraVoiceCore({
   // --- Render ---------------------------------------------------------------
   return (
     <div className="relative flex flex-col h-full min-h-0 w-full bg-zinc-950 overflow-hidden">
-      {/* LiveCanvas — Layer 2: audio-reactive particle surface + diagram mode */}
-      <LiveCanvas
-        mode={canvasMode}
+      {/* AuraLiveCanvas - Layer 2: audio-reactive particle surface + diagram mode */}
+      <AuraLiveCanvas
+        mode={visualShell.mode}
         micLevel={micLevel}
         audioAmplitude={micLevel}
+        activeDiagram={visualShell.activeDiagram}
+        themeColor={visualShell.themeColor}
+        message={visualShell.message}
       />
+      <AuraTerminalOverlay data={visualShell.activeTerminalVisual} onClose={() => visualShellStateService.closeTerminalVisual()} />
       <NotificationToast position="top-right" maxVisible={3} />
 
       {/* -- Status strip: orb-centric, minimal top -- */}
@@ -640,7 +654,14 @@ export function AuraVoiceCore({
 
       {/* -- Orb + transcript (scrollable) -- */}
       <div className="relative z-10 flex-1 min-h-0 overflow-y-auto flex flex-col items-center px-4 pt-16 pb-0 gap-3">
-        <AuraVoiceVisualizer state={effectiveVis} source={conversationModeEnabled && loop.loopPhase === 'listening' ? 'admin' : 'aura'} size="xl" showLabel />
+        <AuraOrbVisualizer
+          mode={visualShell.mode}
+          micLevel={micLevel}
+          audioAmplitude={micLevel}
+          isDiagramOpen={Boolean(visualShell.activeDiagram)}
+          themeColor={visualShell.themeColor}
+          showLabel
+        />
         {isVoiceActive && <AdminVoiceIndicator state={adminState} />}
 
         {/* Live transcript */}

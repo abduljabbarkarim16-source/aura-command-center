@@ -13,7 +13,8 @@ export type ToolCategory =
   | 'voice'       // voice-related actions
   | 'system'      // workspace / config
   | 'memory'      // read/write AURA's persistent memory + user profile
-  | 'capability'; // query/test AURA's own capability registry
+  | 'capability'  // query/test AURA's own capability registry
+  | 'visual';     // control AURA's visual shell only
 
 export interface ToolDefinition {
   id: string;
@@ -25,6 +26,8 @@ export interface ToolDefinition {
   requiresApproval: boolean;
   /** Stable string keys this tool accepts */
   allowedInputKeys: string[];
+  /** Optional model-facing input descriptions for richer function schemas */
+  inputDescriptions?: Record<string, string>;
   /** Stable string keys that are rejected (e.g. shell metacharacters) */
   blockedInputPatterns: string[];
   timeoutMs: number;

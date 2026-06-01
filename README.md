@@ -2,7 +2,7 @@
 
 **AURA** - *Autonomous Unified Reasoning Agent* - is a voice-first AI desktop operator built with Tauri, Rust, React, and TypeScript.
 
-**Current version:** v0.5.3 - Phase 3K+ Model Intelligence Upgrade (Local Nervous System)
+**Current version:** v0.6.0 - Phase 3K Visual Shell (Aura UI Visual Shell Port)
 
 ## What Works Now
 
@@ -23,6 +23,8 @@
 ### Operator UI
 
 - **Voice Core** - primary operator surface with voice controls, approvals, memory, and technical drawers.
+- **Visual shell** - Aura-ui inspired layered canvas/orb surface driven by real voice and RuntimeTask state.
+- **Visual tools** - AURA can show diagrams, focus tasks, change canvas theme, and show RuntimeTask-backed terminal visuals.
 - **Notifications** - voice/runtime errors route to the notification tray.
 - **Right-side operator panel** - Activity, Tasks, Terminal, Logs, Memory, Capabilities, Recipes, Notifications, and Details.
 - **Provider readiness** - local status and approval-gated smoke tests in Settings.
@@ -50,7 +52,7 @@
 Download the installer from `src-tauri/target/release/bundle/nsis/` after running `npm run tauri:build`:
 
 ```text
-AURA Command Center_0.5.0_x64-setup.exe
+AURA Command Center_0.6.0_x64-setup.exe
 ```
 
 Run the installer, then launch AURA Command Center from the Start menu.
@@ -94,8 +96,10 @@ Requirements: Node.js 18+, Rust 1.77+, Visual Studio Build Tools 2022 with the C
 ```text
 src/
   components/operator/   Voice Core, operator panels, approvals
+  components/visual/     Aura canvas, orb, diagrams, and terminal overlay
   hooks/                 voice, runtime, workspace hooks
   services/
+    visual/              visual shell state service
     voice/               OpenAI voice session and transcript services
     notifications/       local notification persistence
     context/             context compression
@@ -131,4 +135,4 @@ src-tauri/src/
 
 ---
 
-Initial autonomous build by Claude/Anthropic. Current audit hardening by Codex/OpenAI.
+Initial autonomous build by Claude/Anthropic. Current visual shell port by Codex/OpenAI.

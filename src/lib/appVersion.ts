@@ -6,15 +6,16 @@
  *   0.1.x  - Phase 1  (UI architecture)
  *   0.2.x  - Phase 2  (foundation, persistence, relay, command policy)
  *   0.3.x  - Phase 3  (live providers, self-build, voice)
+ *   0.6.x  - Phase 3K (Aura UI visual shell)
  *   0.3.0  - Phase 3A (live connection verification)
  *   0.3.1  - Phase 3B (self-build dry run, voice foundation)
  *   0.3.2  - Phase 3C (voice conversation MVP - STT/Chat/TTS via Tauri backend)
  */
 
-export const APP_VERSION = '0.5.5';
-export const APP_PHASE   = 'Phase 3K+';
-export const APP_PHASE_LABEL = 'Hallucination Fix + Task Sequencer';
-export const BUILD_DATE  = '2026-05-31';
+export const APP_VERSION = '0.6.0';
+export const APP_PHASE   = 'Phase 3K Visual Shell';
+export const APP_PHASE_LABEL = 'Aura UI Visual Shell Port';
+export const BUILD_DATE  = '2026-06-01';
 
 /**
  * Build provenance - injected at build time by vite.config.ts `define`.
@@ -35,14 +36,14 @@ export const VERSION_DISPLAY = `v${APP_VERSION} / ${APP_PHASE}`;
 
 /**
  * Compact, copyable build marker for the Details panel.
- * e.g. "v0.5.1 · Phase 3J QA · a1b2c3d · 2026-05-31 14:22"
+ * e.g. "v0.6.0 - Phase 3K Visual Shell - a1b2c3d - 2026-06-01 14:22"
  */
 export const BUILD_MARKER = [
   `v${APP_VERSION}`,
   APP_PHASE,
   BUILD_SHA,
   BUILD_TIME ? BUILD_TIME.slice(0, 16).replace('T', ' ') : BUILD_DATE,
-].join(' · ');
+].join(' - ');
 
 /** Changelog - newest entry first */
 export interface ChangelogEntry {
@@ -54,6 +55,19 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version:  '0.6.0',
+    phase:    'Phase 3K Visual Shell',
+    date:     '2026-06-01',
+    summary:  'Aura UI Visual Shell Port',
+    highlights: [
+      'Aura-ui canvas/orb visual shell ported into the real AURA desktop runtime',
+      'Voice Core now uses a layered canvas-first surface driven by real voice and RuntimeTask state',
+      'AI-callable visual tools can show diagrams, focus tasks, set canvas theme, and reset the canvas',
+      'Terminal visuals are RuntimeTask-backed or clearly marked illustrative; they never invent command output',
+      'Existing Tauri, voice, memory, permission, notification, and right-panel systems remain authoritative',
+    ],
+  },
   {
     version:  '0.5.2',
     phase:    'Phase 3K',

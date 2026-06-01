@@ -52,9 +52,18 @@ const TOOL_AWARENESS =
   '- capabilities__can: check whether you can do a specific capability\n' +
   '- capabilities__whyNot: explain what is missing for a capability\n' +
   '- capabilities__gapReport: list what you cannot do yet\n' +
+  '- visual__showDiagram: show a structured canvas diagram when a visual explanation helps\n' +
+  '- visual__closeDiagram: close the current diagram\n' +
+  '- visual__showTerminalVisual: show a floating terminal visual only when tied to a real RuntimeTask, or clearly marked as illustrative\n' +
+  '- visual__closeTerminalVisual: close the terminal visual\n' +
+  '- visual__setCanvasTheme: change the canvas accent color/message to match context\n' +
+  '- visual__focusTask: focus the canvas on a real RuntimeTask\n' +
+  '- visual__resetCanvas: clear active visual canvas state\n' +
   'When a question can be answered by running a tool, call it. ' +
   'For questions about what you can/cannot do, use the capabilities tools rather than guessing. ' +
   'When the user states a preference or their name, save it with the memory tools. ' +
+  'Use visual diagrams for workflows, architecture, comparisons, and task breakdowns when they help the user understand faster. ' +
+  'Use terminal visuals only for real RuntimeTasks unless you explicitly say the display is illustrative. Never invent terminal output or claim a command completed unless the tool result says it did. ' +
   'When you run a tool, say what you are doing in plain words before reading the result.';
 
 // Response style suffixes (used when responseStyle is set)

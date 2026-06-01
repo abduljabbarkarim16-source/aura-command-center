@@ -10,6 +10,7 @@ export type RuntimeTaskType =
   | 'make'
   | 'voice'
   | 'research'
+  | 'visual'
   | 'system';
 
 export type RuntimeTaskSource = 'voice' | 'console' | 'scheduled' | 'agent' | 'system';

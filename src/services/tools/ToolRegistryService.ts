@@ -21,6 +21,7 @@ import type { RuntimeTaskType, RuntimeTask } from '../../types/runtime-task';
 import { ToolResultNormalizer } from './ToolResultNormalizer';
 import type { ToolResult } from '../../types/tool-result';
 import { incidentService } from '../testing/IncidentService';
+import { visualShellStateService } from '../visual/VisualShellStateService';
 
 function uid(): string {
   return `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -227,6 +228,104 @@ export const TOOL_CATALOG: ToolDefinition[] = [
     category: 'capability', risk: 'low', requiresApproval: false,
     allowedInputKeys: [], blockedInputPatterns: [], timeoutMs: 5_000,
   },
+  // Visual shell tools. These only control local UI state; they never execute commands.
+  {
+    id: 'visual.showDiagram',
+    name: 'Show canvas diagram',
+    description: 'Render a structured diagram on the AURA canvas. Use this for workflows, architecture, task plans, comparisons, and visual explanations.',
+    category: 'visual',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: ['title', 'description', 'layoutMode', 'themeColor', 'nodesJson', 'edgesJson'],
+    inputDescriptions: {
+      title: 'Diagram title.',
+      description: 'Short diagram subtitle or explanation.',
+      layoutMode: 'One of grid, list, flow, bento.',
+      themeColor: 'Theme color name such as indigo, cyan, emerald, amber, rose, violet, zinc.',
+      nodesJson: 'JSON array of nodes: [{ "label": "...", "detail": "...", "emoji": "...", "color": "cyan", "status": "running" }]. Keep to 3-8 nodes.',
+      edgesJson: 'Optional JSON array of flow edges: [{ "from": "node-id-or-label", "to": "node-id-or-label", "label": "..." }].',
+    },
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'visual.closeDiagram',
+    name: 'Close canvas diagram',
+    description: 'Close the current canvas diagram and return the visual shell to normal voice/task state.',
+    category: 'visual',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: [],
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'visual.showTerminalVisual',
+    name: 'Show terminal visual',
+    description: 'Show a floating terminal visual. Prefer providing a real RuntimeTask taskId. Without a real task, it is marked illustrative and must not pretend a command ran.',
+    category: 'visual',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: ['taskId', 'command'],
+    inputDescriptions: {
+      taskId: 'Optional real RuntimeTask id. Required for real terminal logs.',
+      command: 'Optional display label if no RuntimeTask exists; no command will be executed by this visual tool.',
+    },
+    blockedInputPatterns: ['`', '$', '|', '&', ';'],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'visual.closeTerminalVisual',
+    name: 'Close terminal visual',
+    description: 'Close the floating terminal visual without affecting the underlying RuntimeTask history.',
+    category: 'visual',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: [],
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'visual.setCanvasTheme',
+    name: 'Set canvas theme',
+    description: 'Set the visual shell accent color, icon marker, and optional status message.',
+    category: 'visual',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: ['themeColor', 'accentIcon', 'message'],
+    inputDescriptions: {
+      themeColor: 'Theme color name such as indigo, cyan, emerald, amber, rose, violet, zinc.',
+      accentIcon: 'Short icon or emoji-like marker. Keep it compact.',
+      message: 'Short status message to display on the canvas.',
+    },
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'visual.focusTask',
+    name: 'Focus runtime task',
+    description: 'Focus the canvas on an existing RuntimeTask. Terminal and CLI tasks can show their real logs in the terminal visual.',
+    category: 'visual',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: ['taskId'],
+    inputDescriptions: {
+      taskId: 'Existing RuntimeTask id to focus.',
+    },
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'visual.resetCanvas',
+    name: 'Reset canvas',
+    description: 'Clear active visual shell diagram, terminal visual, focused task, theme override, and message.',
+    category: 'visual',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: [],
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
 ];
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -321,6 +420,7 @@ class ToolRegistryServiceImpl {
       else if (tool.category === 'cli_agent') taskType = 'cli';
       else if (tool.category === 'memory') taskType = 'memory';
       else if (tool.category === 'capability') taskType = 'capability';
+      else if (tool.category === 'visual') taskType = 'visual';
 
       runtimeTask = runtimeTaskService.createTask({
         title: `Tool: ${tool.name}`,
@@ -476,7 +576,7 @@ class ToolRegistryServiceImpl {
     }
 
     // ── Memory + capability tools (JS-native, no Rust) ──────────────────
-    if (tool.category === 'memory' || tool.category === 'capability') {
+    if (tool.category === 'memory' || tool.category === 'capability' || tool.category === 'visual') {
       return this.runNativeTool(tool.id, inputs, start);
     }
 
@@ -484,7 +584,7 @@ class ToolRegistryServiceImpl {
   }
 
   /**
-   * Execute JS-native tools (memory.*, capabilities.*).
+   * Execute JS-native tools (memory.*, capabilities.*, visual.*).
    * Uses lazy dynamic imports to avoid a module-load cycle with
    * CapabilityRegistryService (which imports this registry).
    */
@@ -562,6 +662,40 @@ class ToolRegistryServiceImpl {
       case 'capabilities.gapReport': {
         const { capabilityGapService } = await import('../capabilities/CapabilityGapService');
         return done(capabilityGapService.report().text);
+      }
+      case 'visual.showDiagram': {
+        visualShellStateService.showDiagramFromTool(inputs);
+        return done('Canvas diagram shown.');
+      }
+      case 'visual.closeDiagram': {
+        visualShellStateService.closeDiagram();
+        return done('Canvas diagram closed.');
+      }
+      case 'visual.showTerminalVisual': {
+        const taskId = (inputs['taskId'] ?? '').trim();
+        const task = taskId ? runtimeTaskService.getTask(taskId) : undefined;
+        visualShellStateService.showTerminalVisualFromTool(inputs);
+        if (task) return done('Terminal visual shown from RuntimeTask.');
+        if (taskId) return done(`RuntimeTask not found: ${taskId}. Illustrative terminal visual shown without executing a command.`, 1);
+        return done('Illustrative terminal visual shown without executing a command.');
+      }
+      case 'visual.closeTerminalVisual': {
+        visualShellStateService.closeTerminalVisual();
+        return done('Terminal visual closed.');
+      }
+      case 'visual.setCanvasTheme': {
+        visualShellStateService.setCanvasTheme(inputs['themeColor'], inputs['accentIcon'], inputs['message']);
+        return done('Canvas theme updated.');
+      }
+      case 'visual.focusTask': {
+        const taskId = (inputs['taskId'] ?? '').trim();
+        const task = taskId ? runtimeTaskService.getTask(taskId) : undefined;
+        visualShellStateService.focusTaskFromTool(inputs);
+        return task ? done('Canvas task focus updated.') : done(taskId ? `Task not found: ${taskId}.` : 'No task id provided.', 1);
+      }
+      case 'visual.resetCanvas': {
+        visualShellStateService.resetCanvas();
+        return done('Canvas reset.');
       }
       default:
         throw new Error(`No native executor for tool: ${toolId}`);
