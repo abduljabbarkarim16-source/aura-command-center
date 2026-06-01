@@ -12,9 +12,9 @@
  *   0.3.2  - Phase 3C (voice conversation MVP - STT/Chat/TTS via Tauri backend)
  */
 
-export const APP_VERSION = '0.6.0';
-export const APP_PHASE   = 'Phase 3K Visual Shell';
-export const APP_PHASE_LABEL = 'Aura UI Visual Shell Port';
+export const APP_VERSION = '0.6.1';
+export const APP_PHASE   = 'Phase 3K Self-Repair';
+export const APP_PHASE_LABEL = 'Agent Handshake + Diagnostic Repair';
 export const BUILD_DATE  = '2026-06-01';
 
 /**
@@ -36,7 +36,7 @@ export const VERSION_DISPLAY = `v${APP_VERSION} / ${APP_PHASE}`;
 
 /**
  * Compact, copyable build marker for the Details panel.
- * e.g. "v0.6.0 - Phase 3K Visual Shell - a1b2c3d - 2026-06-01 14:22"
+ * e.g. "v0.6.1 - Phase 3K Self-Repair - a1b2c3d - 2026-06-01 14:22"
  */
 export const BUILD_MARKER = [
   `v${APP_VERSION}`,
@@ -55,6 +55,19 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version:  '0.6.1',
+    phase:    'Phase 3K Self-Repair',
+    date:     '2026-06-01',
+    summary:  'Agent Handshake + Diagnostic Repair',
+    highlights: [
+      'Agent handshake now sends real Claude/Codex sentinel prompts as background RuntimeTasks',
+      'AURA can send approved background prompts to connected CLI agents and inspect session output',
+      'Full system diagnostic now runs Rust tests from src-tauri and uses the correct capability input key',
+      'Added repair-last-diagnostic flow: analyze failures, log repair memory, rerun the full diagnostic',
+      'Safe repair notes are written to durable AURA memory and the local ai-build-memory event log when available',
+    ],
+  },
   {
     version:  '0.6.0',
     phase:    'Phase 3K Visual Shell',

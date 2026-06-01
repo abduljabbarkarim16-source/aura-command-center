@@ -50,7 +50,9 @@ fn load_dotenv() {
     // 4. Try common dev-environment project paths under %USERPROFILE%\Documents
     if let Ok(home) = std::env::var("USERPROFILE") {
         let roots = [
+            "Documents\\AURA\\agent-command-center-phase-3j",
             "Documents\\AURA\\agent-command-center",
+            "Documents\\aura\\agent-command-center-phase-3j",
             "Documents\\aura\\agent-command-center",
             "aura-command-center",
         ];
@@ -88,6 +90,7 @@ pub fn run() {
             commands::check_cli_available,
             commands::get_workspace_path,
             commands::set_workspace_path,
+            commands::append_memory_repo_event,
             config_commands::save_openai_key,
             config_commands::openai_key_is_configured,
             config_commands::delete_openai_key,

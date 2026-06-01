@@ -15,6 +15,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { ToolDefinition, ToolExecution } from '../../types/tools';
 import { cliSessionService } from '../agents/CliSessionService';
 import { cliDiscoveryService } from '../agents/CliDiscoveryService';
+import { agentBridgeService } from '../agents/AgentBridgeService';
 import { permissionModeService } from '../permissions/PermissionModeService';
 import { runtimeTaskService } from '../runtime/RuntimeTaskService';
 import type { RuntimeTaskType, RuntimeTask } from '../../types/runtime-task';
@@ -143,6 +144,57 @@ export const TOOL_CATALOG: ToolDefinition[] = [
     timeoutMs: 60_000,
   },
   // ── Memory tools (JS-native, local only) ───────────────────────────────
+  {
+    id: 'agent.handshakeAllBackground',
+    name: 'Background agent handshake',
+    description: 'Send real sentinel prompts to all detected CLI agents in the background and return session/task ids immediately.',
+    category: 'cli_agent',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: [],
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'agent.sendPromptBackground',
+    name: 'Send agent prompt in background',
+    description: 'Send a prompt to a connected CLI agent as a background RuntimeTask. Use only when the user asks to hand work to an agent.',
+    category: 'cli_agent',
+    risk: 'medium',
+    requiresApproval: false,
+    allowedInputKeys: ['agent', 'prompt'],
+    inputDescriptions: {
+      agent: 'Target CLI agent: claude or codex.',
+      prompt: 'Short prompt to send. Do not include secrets, API keys, or private credentials.',
+    },
+    blockedInputPatterns: ['`', '$', '\\'],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'agent.getSession',
+    name: 'Get agent session',
+    description: 'Read the status and latest output for a background CLI agent session.',
+    category: 'cli_agent',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: ['sessionId'],
+    inputDescriptions: {
+      sessionId: 'Agent session id returned by a background handshake or prompt.',
+    },
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'agent.listSessions',
+    name: 'List agent sessions',
+    description: 'List recent CLI agent sessions with status, task id, and short output preview.',
+    category: 'cli_agent',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: [],
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
   {
     id: 'memory.rememberFact',
     name: 'Remember a fact',
@@ -566,6 +618,66 @@ class ToolRegistryServiceImpl {
     }
 
     // ── CLI run tools ───────────────────────────────────────────────────
+    if (tool.id === 'agent.handshakeAllBackground') {
+      const launches = await agentBridgeService.handshakeAllBackground();
+      const output = launches.length > 0
+        ? launches.map(l => `${l.agentId}: session ${l.sessionId}, task ${l.taskId}`).join('\n')
+        : 'No detected CLI agents to handshake with.';
+      return { output, exitCode: launches.length > 0 ? 0 : 1, durationMs: Date.now() - start };
+    }
+
+    if (tool.id === 'agent.sendPromptBackground') {
+      const agent = (inputs['agent'] ?? '').trim().toLowerCase();
+      const prompt = (inputs['prompt'] ?? '').trim();
+      if (agent !== 'claude' && agent !== 'codex') {
+        return { output: 'Target agent must be claude or codex.', exitCode: 1, durationMs: Date.now() - start };
+      }
+      if (!prompt) {
+        return { output: 'No prompt provided.', exitCode: 1, durationMs: Date.now() - start };
+      }
+      const launch = await agentBridgeService.sendPromptBackground(agent, prompt);
+      return {
+        output: `${agent} background prompt started. Session: ${launch.sessionId}. RuntimeTask: ${launch.taskId}.`,
+        exitCode: 0,
+        durationMs: Date.now() - start,
+      };
+    }
+
+    if (tool.id === 'agent.getSession') {
+      const sessionId = (inputs['sessionId'] ?? '').trim();
+      const session = sessionId ? cliSessionService.getSession(sessionId) : undefined;
+      if (!session) {
+        return { output: sessionId ? `Session not found: ${sessionId}` : 'No session id provided.', exitCode: 1, durationMs: Date.now() - start };
+      }
+      return {
+        output: JSON.stringify({
+          id: session.id,
+          cli: session.cli,
+          status: session.status,
+          runtimeTaskId: session.runtimeTaskId,
+          exitCode: session.exitCode,
+          errorSummary: session.errorSummary,
+          usageLimitMessage: session.usageLimitMessage,
+          output: session.outputLines.slice(-40).join('\n'),
+        }, null, 2),
+        exitCode: session.status === 'error' || session.status === 'usage_limit' ? 1 : 0,
+        durationMs: Date.now() - start,
+      };
+    }
+
+    if (tool.id === 'agent.listSessions') {
+      const sessions = cliSessionService.getSessions().slice(0, 10).map(s => ({
+        id: s.id,
+        cli: s.cli,
+        status: s.status,
+        runtimeTaskId: s.runtimeTaskId,
+        startedAt: s.startedAt,
+        endedAt: s.endedAt,
+        preview: s.outputLines.slice(-3).join('\n').slice(0, 240),
+      }));
+      return { output: JSON.stringify(sessions, null, 2), exitCode: 0, durationMs: Date.now() - start };
+    }
+
     if (tool.id === 'cli.claudeRunTiny' || tool.id === 'cli.codexRunTiny') {
       const cli = tool.id === 'cli.claudeRunTiny' ? 'claude' : 'codex';
       const prompt = inputs['prompt'] ?? 'Reply exactly with: AURA_CLI_OK';

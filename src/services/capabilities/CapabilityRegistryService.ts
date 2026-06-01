@@ -163,6 +163,27 @@ export const CAPABILITY_CATALOG: Capability[] = [
 
   // ── Memory ─────────────────────────────────────────────────────────────────
   cap({
+    id: 'agent.backgroundHandshake', name: 'Background agent handshake', category: 'agent',
+    description: 'Send real sentinel prompts to detected CLI agents as background RuntimeTasks.',
+    status: 'available', testable: false, riskLevel: 'low',
+    requiredTools: ['agent.handshakeAllBackground'], requiredSecrets: [], requiredApprovals: [],
+    evidence: { sourceFiles: ['src/services/agents/AgentBridgeService.ts', 'src/services/agents/CliSessionService.ts'], docsPath: DOCS },
+  }),
+  cap({
+    id: 'system.selfRepair', name: 'Diagnostic self-repair', category: 'agent',
+    description: 'Analyze the last diagnostic, apply known safe repairs, log memory, and rerun diagnostics.',
+    status: 'available', testable: false, riskLevel: 'medium',
+    requiredTools: [], requiredSecrets: [], requiredApprovals: [],
+    evidence: { sourceFiles: ['src/services/tasks/SequentialTaskRunnerService.ts', 'src-tauri/src/commands.rs'], docsPath: DOCS },
+  }),
+  cap({
+    id: 'memory.repoEventLog', name: 'Memory repo event log', category: 'memory',
+    description: 'Append controlled self-repair events to local ai-build-memory/logs/agent-events.jsonl.',
+    status: 'available', testable: false, riskLevel: 'low',
+    requiredTools: [], requiredSecrets: [], requiredApprovals: [],
+    evidence: { sourceFiles: ['src-tauri/src/commands.rs'], docsPath: DOCS },
+  }),
+  cap({
     id: 'memory.read', name: 'Read memory', category: 'memory',
     description: 'Recall stored facts and inject them into context.',
     status: 'unknown', testable: true, riskLevel: 'none',

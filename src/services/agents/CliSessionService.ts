@@ -1,14 +1,10 @@
 /**
- * CliSessionService — AURA Phase 3F
+ * CliSessionService - AURA CLI session manager.
  *
- * Manages agent CLI sessions: spawn, track, store output, detect usage limits.
- *
- * Security:
- *  - All spawning goes through Tauri Rust backend (binary allowlist enforced there)
- *  - Prompt sanitised by Rust layer (length, metacharacters)
- *  - No secrets, no API keys, no repo source in prompts
- *  - Sessions have hard timeout (60s) enforced in Rust
- *  - Max concurrent sessions: 2
+ * Spawns allowlisted local agent CLIs through the Tauri Rust bridge, tracks
+ * their output, and mirrors each run into RuntimeTask history. `spawn()` waits
+ * for completion; `spawnBackground()` returns ids immediately and lets the
+ * process finish in the background.
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -16,26 +12,36 @@ import type { AgentSession, AgentCLI, AgentSessionStatus } from '../../types/age
 import { runtimeTaskService } from '../runtime/RuntimeTaskService';
 
 const MAX_OUTPUT_LINES = 500;
-const MAX_CONCURRENT   = 2;
+const MAX_CONCURRENT = 2;
 
 interface RustSessionResult {
-  sessionId:            string;
-  binary:               string;
-  success:              boolean;
-  exitCode:             number;
-  stdout:               string;
-  stderr:               string;
-  durationMs:           number;
-  timedOut:             boolean;
-  usageLimitDetected:   boolean;
-  usageLimitMessage?:   string;
-  error?:               string;
+  sessionId: string;
+  binary: string;
+  success: boolean;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  timedOut: boolean;
+  usageLimitDetected: boolean;
+  usageLimitMessage?: string;
+  error?: string;
+}
+
+export interface AgentSessionLaunch {
+  sessionId: string;
+  taskId: string;
+  completion: Promise<AgentSession | undefined>;
 }
 
 type SessionListener = (sessions: AgentSession[]) => void;
 
 function uid(): string {
   return `cls-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function cliName(cli: AgentCLI): string {
+  return cli === 'claude' ? 'Claude' : 'Codex';
 }
 
 class CliSessionServiceImpl {
@@ -60,15 +66,25 @@ class CliSessionServiceImpl {
 
   getSessions(): AgentSession[] { return [...this.sessions]; }
 
+  getSession(id: string): AgentSession | undefined {
+    return this.sessions.find(s => s.id === id);
+  }
+
   getActiveCount(): number {
     return this.sessions.filter(s => s.status === 'running').length;
   }
 
-  /** Spawn a CLI agent session with a prompt. Returns session id. */
-  async spawn(cli: AgentCLI, prompt: string): Promise<string> {
+  private createSession(cli: AgentCLI, prompt: string): { id: string; taskId: string } {
     if (this.getActiveCount() >= MAX_CONCURRENT) {
       throw new Error(`Max concurrent CLI sessions (${MAX_CONCURRENT}) already running.`);
     }
+
+    const task = runtimeTaskService.createTask({
+      title: `${cliName(cli)} CLI Session`,
+      type: 'cli',
+      source: 'agent',
+      risk: 'medium',
+    });
 
     const id = uid();
     const session: AgentSession = {
@@ -77,23 +93,24 @@ class CliSessionServiceImpl {
       status: 'running',
       startedAt: new Date().toISOString(),
       prompt,
+      runtimeTaskId: task.id,
       outputLines: [],
     };
 
     this.sessions = [session, ...this.sessions].slice(0, 50);
     this.notify();
 
-    // Create a corresponding RuntimeTask
-    const task = runtimeTaskService.createTask({
-      title: `${cli === 'claude' ? 'Claude' : 'Codex'} CLI Session`,
-      type: 'cli',
-      source: 'agent',
-      risk: 'medium',
-    });
     runtimeTaskService.startTask(task.id);
     runtimeTaskService.appendLog(task.id, `Prompt: ${prompt}`);
+    return { id, taskId: task.id };
+  }
 
-    // Spawn via Rust (non-blocking — invoke awaits until process completes)
+  private async runSessionProcess(
+    cli: AgentCLI,
+    prompt: string,
+    id: string,
+    taskId: string,
+  ): Promise<AgentSession | undefined> {
     try {
       const result = await invoke<RustSessionResult>('spawn_agent_session', {
         binary: cli,
@@ -105,9 +122,14 @@ class CliSessionServiceImpl {
         ...result.stdout.split('\n').filter(Boolean),
         ...result.stderr.split('\n').filter(Boolean),
       ].slice(0, MAX_OUTPUT_LINES);
-      
+
       if (lines.length > 0) {
-        runtimeTaskService.appendLog(task.id, lines.join('\n').slice(0, 200) + (lines.join('\n').length > 200 ? '...' : ''), result.success ? 'success' : 'warn');
+        const joined = lines.join('\n');
+        runtimeTaskService.appendLog(
+          taskId,
+          joined.slice(0, 200) + (joined.length > 200 ? '...' : ''),
+          result.success ? 'success' : 'warn',
+        );
       }
 
       let status: AgentSessionStatus = result.success ? 'completed' : 'error';
@@ -122,11 +144,11 @@ class CliSessionServiceImpl {
         errorSummary: result.error ?? (result.timedOut ? 'Session timed out after 60s' : undefined),
         usageLimitMessage: result.usageLimitMessage,
       });
-      
+
       if (status === 'completed') {
-        runtimeTaskService.completeTask(task.id, result, 'Completed successfully');
+        runtimeTaskService.completeTask(taskId, result, 'Completed successfully');
       } else {
-        runtimeTaskService.failTask(task.id, result.error ?? result.usageLimitMessage ?? 'Session failed');
+        runtimeTaskService.failTask(taskId, result.error ?? result.usageLimitMessage ?? 'Session failed');
       }
     } catch (err) {
       this.update(id, {
@@ -134,16 +156,26 @@ class CliSessionServiceImpl {
         endedAt: new Date().toISOString(),
         errorSummary: String(err),
       });
-      
-      runtimeTaskService.appendLog(task.id, String(err), 'error');
-      runtimeTaskService.failTask(task.id, String(err));
+
+      runtimeTaskService.appendLog(taskId, String(err), 'error');
+      runtimeTaskService.failTask(taskId, String(err));
     }
 
+    return this.getSession(id);
+  }
+
+  /** Spawn a CLI agent session with a prompt and wait for completion. */
+  async spawn(cli: AgentCLI, prompt: string): Promise<string> {
+    const { id, taskId } = this.createSession(cli, prompt);
+    await this.runSessionProcess(cli, prompt, id, taskId);
     return id;
   }
 
-  getSession(id: string): AgentSession | undefined {
-    return this.sessions.find(s => s.id === id);
+  /** Spawn a CLI agent session and return immediately while it runs. */
+  spawnBackground(cli: AgentCLI, prompt: string): AgentSessionLaunch {
+    const { id, taskId } = this.createSession(cli, prompt);
+    const completion = this.runSessionProcess(cli, prompt, id, taskId);
+    return { sessionId: id, taskId, completion };
   }
 
   clearCompleted() {
