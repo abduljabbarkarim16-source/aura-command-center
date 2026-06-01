@@ -201,17 +201,46 @@ class OpenAIVoiceSessionServiceImpl {
 
   // ── Sentence splitter ─────────────────────────────────────────────────────
   //
-  // Splits text into sentences for sentence-first TTS queuing.
-  // Returns at least one element.
+  // Splits text into sentences for parallel TTS synthesis queuing.
+  // Returns at least one element. Short fragments are merged into the next
+  // sentence so we don't fire too many tiny TTS requests.
 
   splitIntoSentences(text: string): string[] {
     if (!text.trim()) return [];
-    // Split on sentence-ending punctuation followed by space or end-of-string
-    const parts = text
+
+    // Collapse ellipsis (...) so it never triggers a false split.
+    const ELLIPSIS = '…';
+    const protected_ = text.replace(/\.{2,}/g, ELLIPSIS);
+
+    const raw = protected_
       .split(/(?<=[.!?])\s+/)
-      .map(s => s.trim())
+      .map(s => s.replace(new RegExp(ELLIPSIS, 'g'), '...').trim())
       .filter(Boolean);
-    return parts.length > 0 ? parts : [text.trim()];
+
+    if (raw.length === 0) return [text.trim()];
+
+    // Merge short leading/trailing fragments (< 40 chars) into the adjacent
+    // sentence to avoid hammering TTS with trivial one-word chunks.
+    const merged: string[] = [];
+    let buf = '';
+    for (const part of raw) {
+      buf = buf ? `${buf} ${part}` : part;
+      if (buf.length >= 40) {
+        merged.push(buf);
+        buf = '';
+      }
+    }
+    if (buf) {
+      // Append any leftover to the last merged sentence if it exists and is short,
+      // otherwise push as its own chunk.
+      if (merged.length > 0 && buf.length < 40) {
+        merged[merged.length - 1] += ` ${buf}`;
+      } else {
+        merged.push(buf);
+      }
+    }
+
+    return merged.length > 0 ? merged : [text.trim()];
   }
 
   // ── TTS: synthesize speech via Tauri backend ──────────────────────────────
@@ -223,15 +252,19 @@ class OpenAIVoiceSessionServiceImpl {
     if (!text.trim()) return { success: false, error: 'Empty text' };
     const start = Date.now();
     try {
-      const audioBytes = await invoke<number[]>('openai_synthesize_speech', {
+      const bytes = await invoke<number[]>('openai_synthesize_speech', {
         text: text.trim(),
         voice,
       });
 
-      const blob = new Blob([new Uint8Array(audioBytes)], { type: 'audio/mpeg' });
+      const uint8 = new Uint8Array(bytes);
+      // Return the underlying ArrayBuffer alongside the blob URL so the Web
+      // Audio API path can decode it directly without an extra fetch() call.
+      const audioBytes = uint8.buffer;
+      const blob = new Blob([uint8], { type: 'audio/mpeg' });
       const audioBlobUrl = URL.createObjectURL(blob);
 
-      return { success: true, audioBlobUrl, latencyMs: Date.now() - start };
+      return { success: true, audioBlobUrl, audioBytes, latencyMs: Date.now() - start };
     } catch (err) {
       return { success: false, error: String(err), latencyMs: Date.now() - start };
     }

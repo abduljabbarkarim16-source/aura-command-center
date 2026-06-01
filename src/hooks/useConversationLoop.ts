@@ -119,6 +119,9 @@ export function useConversationLoop(config: ConversationLoopConfig) {
   // ── Refs ──────────────────────────────────────────────────────────────────
   const loopPhaseRef        = useRef<LoopPhase>('idle');
   const audioRef            = useRef<HTMLAudioElement | null>(null);
+  // Web Audio API refs — used by the parallel-synthesis PATH 2
+  const webAudioCtxRef      = useRef<AudioContext | null>(null);
+  const webAudioSourcesRef  = useRef<AudioBufferSourceNode[]>([]);
   const dormancyTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bargeInRef          = useRef<BargeInState>({ analyser: null, ctx: null, stream: null, frameCount: 0 });
   const bargeInPollRef      = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -212,8 +215,17 @@ export function useConversationLoop(config: ConversationLoopConfig) {
           bi.frameCount++;
           if (bi.frameCount >= BARGE_IN_FRAME_GATE && loopPhaseRef.current === 'speaking') {
             stopBargeInAnalyser();
-            // Interrupt and start listening
+            // Interrupt HTML audio (fast mode / PATH 3)
             audioRef.current?.pause();
+            // Interrupt Web Audio API sources (PATH 2 parallel synthesis)
+            if (webAudioSourcesRef.current.length > 0) {
+              webAudioSourcesRef.current.forEach(src => { try { src.stop(0); } catch { /* already stopped */ } });
+              webAudioSourcesRef.current = [];
+            }
+            if (webAudioCtxRef.current) {
+              try { webAudioCtxRef.current.close(); } catch { /* ignore */ }
+              webAudioCtxRef.current = null;
+            }
             if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
             runningRef.current = false;
             setCurrentAudioUrl(null);
@@ -585,63 +597,108 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     updatePhase('preparing_voice');
     voiceLatencyService.markTTSStart(turnId);
 
-    // ── PATH 2: Sentence-first TTS ────────────────────────────────────────
+    // ── PATH 2: Sentence-first TTS with parallel synthesis queue ─────────────
+    //
+    // All sentences are kicked off concurrently so synthesis 2, 3, … overlap
+    // with playback of sentence 1.  Web Audio API scheduling eliminates the
+    // inter-sentence gap: each buffer is stamped to start exactly when the
+    // previous one ends, regardless of network latency variation.
     if (sentenceFirstTTSRef.current) {
       const sentences = openAIVoiceSessionService.splitIntoSentences(chatResult.text);
 
       if (sentences.length > 1) {
-        // Synthesize first sentence immediately
-        const first = sentences[0];
         voiceLatencyService.markFirstSentenceTextReady(turnId);
-        const firstTts = await openAIVoiceSessionService.synthesizeSpeech(
-          first, settingsRef.current.ttsVoice,
+
+        // Fire ALL sentence syntheses concurrently upfront.
+        const ttsPromises = sentences.map(s =>
+          openAIVoiceSessionService.synthesizeSpeech(s, settingsRef.current.ttsVoice),
         );
 
-        if (firstTts.success && firstTts.audioBlobUrl) {
+        // Await only the first sentence — it unblocks playback ASAP.
+        const firstTts = await ttsPromises[0];
+
+        if (firstTts.success && firstTts.audioBytes) {
           voiceLatencyService.markTTSEnd(turnId);
           voiceLatencyService.markFirstSentenceTtsReady(turnId);
-          voiceLatencyService.markAudioStart(turnId);
-          voiceLatencyService.markFirstAudioStart(turnId);
-          setCurrentAudioUrl(firstTts.audioBlobUrl);
-          updatePhase('speaking');
-          startBargeInAnalyser();
 
-          const remainingText = sentences.slice(1).join(' ');
+          // Decode sentence 1 while we're still setting up.
+          const audioCtx = new AudioContext();
+          webAudioCtxRef.current = audioCtx;
+          const sources: AudioBufferSourceNode[] = [];
+          webAudioSourcesRef.current = sources;
 
-          // Synthesize remaining while first plays
-          const remainTtsPromise = remainingText
-            ? openAIVoiceSessionService.synthesizeSpeech(remainingText, settingsRef.current.ttsVoice)
-            : Promise.resolve<import('../types/voice-session').VoiceSpeechResult>({ success: false });
+          // slice() is required — decodeAudioData detaches the buffer in-place.
+          let firstBuf: AudioBuffer | undefined;
+          try {
+            firstBuf = await audioCtx.decodeAudioData(firstTts.audioBytes.slice(0));
+          } catch {
+            // Decode failed — clean up and fall through to PATH 3.
+            audioCtx.close();
+            webAudioCtxRef.current = null;
+            webAudioSourcesRef.current = [];
+            ttsPromises.slice(1).forEach(p => p.then(r => { if (r.audioBlobUrl) URL.revokeObjectURL(r.audioBlobUrl); }));
+          }
 
-          const firstAudio = new Audio(firstTts.audioBlobUrl);
-          audioRef.current = firstAudio;
-          firstAudio.play().catch(() => {});
+          if (firstBuf) {
+            updatePhase('speaking');
+            startBargeInAnalyser();
+            voiceLatencyService.markAudioStart(turnId);
+            voiceLatencyService.markFirstAudioStart(turnId);
 
-          firstAudio.onended = async () => {
-            URL.revokeObjectURL(firstTts.audioBlobUrl!);
-            const remainTts = await remainTtsPromise;
-            if (remainTts.success && remainTts.audioBlobUrl) {
-              const remainAudio = new Audio(remainTts.audioBlobUrl);
-              audioRef.current = remainAudio;
-              setCurrentAudioUrl(remainTts.audioBlobUrl);
-              remainAudio.play().catch(() => {});
-              voiceLatencyService.markFullAudioReady(turnId);
-              remainAudio.onended = () => {
-                URL.revokeObjectURL(remainTts.audioBlobUrl!);
-                stopBargeInAnalyser();
-                setCurrentAudioUrl(null);
-                runningRef.current = false;
-                const metrics = voiceLatencyService.finalize(turnId);
-                if (metrics) setLastLatencyMetrics(metrics);
-                if (autoListenRef.current) startListeningCycle();
-                else updatePhase('idle');
-              };
-              remainAudio.onerror = () => {
-                stopBargeInAnalyser(); runningRef.current = false;
-                voiceLatencyService.abort(turnId);
-                if (autoListenRef.current) startListeningCycle(); else updatePhase('idle');
-              };
-            } else {
+            // Schedule sentence 1 to start now.
+            let nextStart = audioCtx.currentTime + 0.02; // tiny buffer for scheduling safety
+            const scheduleBuffer = (buf: AudioBuffer): AudioBufferSourceNode => {
+              const src = audioCtx.createBufferSource();
+              src.buffer = buf;
+              src.connect(audioCtx.destination);
+              const scheduledAt = Math.max(nextStart, audioCtx.currentTime + 0.01);
+              src.start(scheduledAt);
+              sources.push(src);
+              nextStart = scheduledAt + buf.duration;
+              return src;
+            };
+
+            scheduleBuffer(firstBuf);
+
+            const turn: VoiceConversationTurn = {
+              id: `turn-${Date.now()}`, userText: transcript, auraText: chatResult.text,
+              timestamp: new Date().toISOString(), chatLatencyMs: chatResult.latencyMs,
+            };
+            onTurnRef.current(turn);
+            voiceTranscriptLogService.logTurn({ userText: transcript, auraText: chatResult.text, durationMs: elapsed });
+            extractMemoryIfEnabled(transcript, chatResult.text);
+
+            // Process remaining sentences in order.  Each promise is already in-
+            // flight so awaiting them in sequence resolves near-instantly once
+            // synthesis is done.
+            for (let i = 1; i < ttsPromises.length; i++) {
+              const tts = await ttsPromises[i];
+              if (!runningRef.current) {
+                // Barge-in interrupted — abandon remaining scheduling.
+                if (tts.audioBlobUrl) URL.revokeObjectURL(tts.audioBlobUrl);
+                for (let j = i + 1; j < ttsPromises.length; j++) {
+                  ttsPromises[j].then(r => { if (r.audioBlobUrl) URL.revokeObjectURL(r.audioBlobUrl); });
+                }
+                return;
+              }
+              if (tts.success && tts.audioBytes) {
+                try {
+                  const buf = await audioCtx.decodeAudioData(tts.audioBytes.slice(0));
+                  if (runningRef.current) scheduleBuffer(buf);
+                } catch { /* skip undecodable chunk — gap is preferable to crash */ }
+              }
+              if (tts.audioBlobUrl) URL.revokeObjectURL(tts.audioBlobUrl);
+            }
+
+            voiceLatencyService.markFullAudioReady(turnId);
+
+            // Attach cleanup to the last scheduled source.
+            const lastSrc = sources[sources.length - 1];
+            lastSrc.onended = () => {
+              if (!runningRef.current) return; // already cleaned up by barge-in
+              webAudioCtxRef.current = null;
+              webAudioSourcesRef.current = [];
+              audioCtx.close();
               stopBargeInAnalyser();
               setCurrentAudioUrl(null);
               runningRef.current = false;
@@ -649,23 +706,14 @@ export function useConversationLoop(config: ConversationLoopConfig) {
               if (metrics) setLastLatencyMetrics(metrics);
               if (autoListenRef.current) startListeningCycle();
               else updatePhase('idle');
-            }
-          };
-          firstAudio.onerror = () => {
-            stopBargeInAnalyser(); runningRef.current = false;
-            voiceLatencyService.abort(turnId);
-            if (autoListenRef.current) startListeningCycle(); else updatePhase('idle');
-          };
+            };
 
-          const turn: VoiceConversationTurn = {
-            id: `turn-${Date.now()}`, userText: transcript, auraText: chatResult.text,
-            timestamp: new Date().toISOString(), chatLatencyMs: chatResult.latencyMs,
-          };
-          onTurnRef.current(turn);
-          voiceTranscriptLogService.logTurn({ userText: transcript, auraText: chatResult.text, durationMs: elapsed });
-          extractMemoryIfEnabled(transcript, chatResult.text);
-          return;
+            return;
+          }
         }
+
+        // If synthesis of sentence 1 failed or had no bytes, revoke any resolved URLs and fall through.
+        ttsPromises.forEach(p => p.then(r => { if (r.audioBlobUrl) URL.revokeObjectURL(r.audioBlobUrl); }));
       }
     }
 
