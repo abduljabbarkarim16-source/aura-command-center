@@ -25,7 +25,16 @@
       "csp": "default-src 'self' asset: http://asset.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; font-src 'self' data:; media-src 'self' asset: http://asset.localhost data: blob:; connect-src 'self' ipc: http://ipc.localhost https://api.openai.com https://api.anthropic.com https://generativelanguage.googleapis.com https://*.make.com http://localhost:* ws://localhost:*"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "UPDATE_ME_WITH_YOUR_BASE64_PUBLIC_KEY",
+      "endpoints": [
+        "https://github.com/abduljabbarkarim16-source/aura-command-center/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "bundle": {
+    "createUpdaterArtifacts": true,
     "active": true,
     "targets": "all",
     "icon": [

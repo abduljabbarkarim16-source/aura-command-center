@@ -30,6 +30,7 @@ import type { KeyStorageStatus } from '../types/settings';
 import { MakeConnectorCard } from '../components/connectors/MakeConnectorCard';
 import { SecureKeysCard } from '../components/security/SecureKeysCard';
 import { VoiceReadinessCard } from '../components/operator/VoiceReadinessCard';
+import { UpdaterCard } from '../components/operator/UpdaterCard';
 import { VERSION_DISPLAY, APP_PHASE_LABEL, BUILD_DATE, CHANGELOG } from '../lib/appVersion';
 
 // ---------------------------------------------------------------------------
@@ -690,6 +691,11 @@ export function Settings() {
       {/* ── Voice Readiness ── */}
       <div>
         <VoiceReadinessCard />
+      </div>
+
+      {/* ── System Updates ── */}
+      <div>
+        <UpdaterCard />
       </div>
 
       {/* ── Make.com Connector ── */}
