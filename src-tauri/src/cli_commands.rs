@@ -19,6 +19,11 @@ use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
 /// Only these binaries may be spawned via this module.
@@ -182,10 +187,14 @@ pub fn spawn_agent_session(
         let mut c = Command::new("cmd");
         c.arg("/C").arg(&binary);
         for a in &cli_args { c.arg(a); }
+        #[cfg(target_os = "windows")]
+        c.creation_flags(CREATE_NO_WINDOW);
         c
     } else {
         let mut c = Command::new(&binary);
         c.args(&cli_args);
+        #[cfg(target_os = "windows")]
+        c.creation_flags(CREATE_NO_WINDOW);
         c
     };
 
@@ -304,9 +313,11 @@ pub fn get_cli_help(binary: String) -> CliHelpSummary {
     } else {
         "which"
     };
-    let path_opt = Command::new(check_cmd)
-        .arg(&binary)
-        .output()
+    let mut cmd = Command::new(check_cmd);
+    cmd.arg(&binary);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let path_opt = cmd.output()
         .ok()
         .filter(|o| o.status.success())
         .map(|o| {
@@ -331,17 +342,21 @@ pub fn get_cli_help(binary: String) -> CliHelpSummary {
 
     // Use cmd /C on Windows so .cmd scripts resolve
     let output = if cfg!(target_os = "windows") {
-        Command::new("cmd")
-            .args(["/C", &binary, "--help"])
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", &binary, "--help"])
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .output()
+            .stderr(std::process::Stdio::piped());
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.output()
     } else {
-        Command::new(&binary)
-            .arg("--help")
+        let mut cmd = Command::new(&binary);
+        cmd.arg("--help")
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .output()
+            .stderr(std::process::Stdio::piped());
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.output()
     };
 
     let help_text = match output {

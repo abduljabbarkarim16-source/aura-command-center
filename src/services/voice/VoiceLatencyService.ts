@@ -7,7 +7,7 @@
  * Security: no audio, no transcripts, no API keys stored here.
  */
 
-import type { VoiceLatencyMetrics, LatencyContext } from '../../types/voice-latency';
+import type { VoiceLatencyMetrics, LatencyContext, LatencyStage } from '../../types/voice-latency';
 
 const MAX_STORED = 20;
 const STORAGE_KEY = 'aura.voice.latency.history';
@@ -111,6 +111,16 @@ class VoiceLatencyServiceImpl {
     if (ctx) ctx.fullAudioReadyAt = Date.now();
   }
 
+  markFailureStage(turnId: string, stage: LatencyStage) {
+    const ctx = this.active.get(turnId);
+    if (ctx) ctx.failureStage = stage;
+  }
+
+  markFallbackPath(turnId: string) {
+    const ctx = this.active.get(turnId);
+    if (ctx) ctx.fallbackPath = true;
+  }
+
   finalize(turnId: string): VoiceLatencyMetrics | null {
     const ctx = this.active.get(turnId);
     if (!ctx) return null;
@@ -155,6 +165,8 @@ class VoiceLatencyServiceImpl {
       responseStyle:       ctx.responseStyle,
       segmentedMode:       ctx.segmentedMode,
       sentenceFirstTTS:    ctx.sentenceFirstTTS,
+      failureStage:        ctx.failureStage,
+      fallbackPath:        ctx.fallbackPath,
     };
 
     this.history = [metrics, ...this.history].slice(0, MAX_STORED);
@@ -197,7 +209,8 @@ class VoiceLatencyServiceImpl {
   formatLast(): string {
     const m = this.getLastMetrics();
     if (!m) return 'No metrics yet';
-    return `Perceived ${m.perceivedLatencyMs}ms · STT ${m.sttTotalMs}ms · Chat ${m.chatTotalMs}ms · TTS ${m.ttsSynthesisMs}ms`;
+    if (m.failureStage) return `Failed at ${m.failureStage}`;
+    return `Perceived ${m.perceivedLatencyMs}ms · STT ${m.sttTotalMs}ms · Chat ${m.chatTotalMs}ms · TTS ${m.ttsSynthesisMs}ms${m.fallbackPath ? ' (Fallback used)' : ''}`;
   }
 }
 

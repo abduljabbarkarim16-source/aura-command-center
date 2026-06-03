@@ -1,6 +1,7 @@
 mod cli_commands;
 mod commands;
 mod config_commands;
+mod secret_store;
 mod voice_commands;
 
 // Walk up the directory tree from `start`, trying to load a `.env` file.
@@ -60,6 +61,14 @@ fn load_dotenv() {
             }
         }
     }
+
+    // Hot-migration: check if keys are in Env, push to Keychain, clear Env.
+    use crate::secret_store::{HybridStore, SecretStore};
+    let store = HybridStore;
+    if let Ok(key) = store.get_openai_key() {
+        // This will silently push the key to the keychain if it was only in .env
+        let _ = store.set_openai_key(&key);
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -97,6 +106,7 @@ pub fn run() {
             voice_commands::openai_chat_tool_result,
             voice_commands::openai_extract_memory,
             voice_commands::openai_synthesize_speech,
+            voice_commands::openai_realtime_ephemeral_token,
             cli_commands::spawn_agent_session,
             cli_commands::get_cli_help,
         ])

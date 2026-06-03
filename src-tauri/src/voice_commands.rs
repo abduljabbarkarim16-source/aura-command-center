@@ -117,11 +117,10 @@ pub struct ChatMessage {
 // ─── Key helper ───────────────────────────────────────────────────────────────
 
 fn get_openai_key() -> Result<String, String> {
-    std::env::var("VITE_OPENAI_API_KEY")
-        .or_else(|_| std::env::var("OPENAI_API_KEY"))
-        .map_err(|_| {
-            "OpenAI API key not configured. Save a key in Settings or set VITE_OPENAI_API_KEY/OPENAI_API_KEY.".to_string()
-        })
+    use crate::secret_store::{HybridStore, SecretStore};
+    let store = HybridStore;
+    store.get_openai_key()
+        .map_err(|_| "OpenAI API key not configured. Save a key in Settings.".to_string())
 }
 
 fn truncate_utf8(text: &str, max_bytes: usize) -> &str {
@@ -732,4 +731,42 @@ pub async fn openai_synthesize_speech(
 
     let bytes = res.bytes().await.map_err(|e| e.to_string())?;
     Ok(bytes.to_vec())
+}
+
+/// Request an ephemeral Realtime session token from OpenAI.
+/// Kept inactive on the frontend, but prepares the backend for safe
+/// migration to WebRTC without exposing the permanent API key.
+#[tauri::command]
+pub async fn openai_realtime_ephemeral_token() -> Result<serde_json::Value, String> {
+    let key = get_openai_key()?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let body = serde_json::json!({
+        "model": "gpt-4o-realtime-preview-2024-12-17",
+        "voice": "alloy"
+    });
+
+    let res = client
+        .post("https://api.openai.com/v1/realtime/sessions")
+        .header("Authorization", format!("Bearer {key}"))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {e}"))?;
+
+    let status = res.status();
+    let data: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
+
+    if !status.is_success() {
+        let msg = data["error"]["message"]
+            .as_str()
+            .unwrap_or("Failed to fetch realtime session token");
+        return Err(format!("OpenAI Realtime error: {msg}"));
+    }
+
+    Ok(data)
 }

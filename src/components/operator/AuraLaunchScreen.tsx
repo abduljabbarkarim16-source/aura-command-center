@@ -59,12 +59,9 @@ export function AuraLaunchScreen({ onInitiate }: AuraLaunchScreenProps) {
         </div>
 
         {/* ── Branding ────────────────────────────────────────────────── */}
-        <h1 className="text-4xl font-bold tracking-tight text-white mb-3">
-          AURA Command Center
+        <h1 className="text-[5rem] font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-br from-indigo-400 via-purple-400 to-cyan-400 mb-8 drop-shadow-2xl font-serif">
+          AURA
         </h1>
-        <p className="text-lg text-zinc-400 font-medium tracking-wide mb-8">
-          Agentic Unified Routing Assistant
-        </p>
 
         {/* ── Status chips ────────────────────────────────────────────── */}
         <div className="flex items-center gap-3 mb-10 flex-wrap justify-center">
@@ -133,19 +130,7 @@ export function AuraLaunchScreen({ onInitiate }: AuraLaunchScreenProps) {
           External tools remain locked until approved by the operator.
         </p>
 
-        {/* ── Future: Dispatcher hint ──────────────────────────────────── */}
-        <div className="w-full bg-zinc-900/30 border border-dashed border-zinc-800/60 rounded-2xl px-5 py-4 text-left">
-          <div className="flex items-center gap-2 mb-1.5">
-            <Network className="w-4 h-4 text-zinc-600" />
-            <span className="text-[11px] font-semibold text-zinc-600 uppercase tracking-widest">Coming Soon</span>
-            <span className="px-1.5 py-0.5 bg-zinc-800 text-zinc-500 text-[10px] rounded-full border border-zinc-700/50 font-semibold ml-auto">
-              PLANNED
-            </span>
-          </div>
-          <p className="text-[13px] text-zinc-600 leading-relaxed">
-            <strong className="text-zinc-500">Dispatcher Mode</strong> — Autonomous multi-agent task distribution across connected providers. AURA will coordinate parallel workstreams with zero manual relay steps.
-          </p>
-        </div>
+
 
       </div>
     </div>

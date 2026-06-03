@@ -43,6 +43,7 @@ import { useConversationLoop } from '../../hooks/useConversationLoop';
 import { openAIVoiceSessionService } from '../../services/voice/OpenAIVoiceSessionService';
 import { notifyVoiceError, notifyVoiceSuccess } from '../../services/notifications/NotificationService';
 import { voiceTranscriptLogService } from '../../services/voice/VoiceTranscriptLogService';
+import { voiceTurnCoordinator } from '../../services/voice/VoiceTurnCoordinator';
 import type { VoiceRuntimeState } from '../../types/voice-runtime';
 import type { VoiceConversationTurn, VoiceConversationSettings } from '../../types/voice-session';
 import { DEFAULT_VOICE_SETTINGS } from '../../types/voice-session';
@@ -221,6 +222,14 @@ export function AuraVoiceCore({
   const runningRef       = useRef(false);
   const recordStartRef   = useRef<number | null>(null);
   const voiceSettingsRef = useRef(voiceSettings);
+  const clickThrottleRef = useRef<number>(0);
+
+  const throttled = useCallback((fn: () => void) => () => {
+    if (Date.now() - clickThrottleRef.current < 400) return;
+    clickThrottleRef.current = Date.now();
+    fn();
+  }, []);
+
   useEffect(() => { voiceSettingsRef.current = voiceSettings; }, [voiceSettings]);
 
   const manualRecorder = useVoiceRecorder(voiceSettings.maxRecordingDurationMs);
@@ -314,6 +323,7 @@ export function AuraVoiceCore({
   // ── One-shot processing pipeline ───────────────────────────────────────────
   const processOneShotBlob = useCallback(async (blob: Blob, durationMs: number) => {
     runningRef.current = true;
+    const myTurnId = voiceTurnCoordinator.startTurn();
     setOneShotPhase('transcribing');
     setLiveTranscriptOS({ user: '…', aura: '' });
 
@@ -332,6 +342,7 @@ export function AuraVoiceCore({
     if (blob.size > LONG_SPEECH_BLOB_BYTES) setLiveTranscriptOS({ user: 'Long thought captured…', aura: '' });
 
     const sttResult = await openAIVoiceSessionService.transcribeAudio(blob);
+    if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
     if (!sttResult.success) {
       notifyVoiceError(sttResult.error ?? 'Could not understand audio.');
       setOneShotPhase('idle'); setLiveTranscriptOS(null); runningRef.current = false; return;
@@ -349,6 +360,7 @@ export function AuraVoiceCore({
     const chatResult = await openAIVoiceSessionService.createChatResponse(
       sttResult.text, style, systemPrompt,
     );
+    if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
     if (!chatResult.success || !chatResult.text) {
       notifyVoiceError(chatResult.error ?? 'AI response failed.');
       setOneShotPhase('idle'); runningRef.current = false; return;
@@ -364,6 +376,7 @@ export function AuraVoiceCore({
     extractMemoryIfEnabled(sttResult.text, chatResult.text);
 
     const ttsResult = await openAIVoiceSessionService.synthesizeSpeech(chatResult.text, voiceSettingsRef.current.ttsVoice);
+    if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
     if (!ttsResult.success || !ttsResult.audioBlobUrl) {
       setOneShotPhase('idle'); runningRef.current = false; return;
     }
@@ -412,9 +425,11 @@ export function AuraVoiceCore({
 
     if (voiceSettings.autoStopEnabled) {
       // Segmented path: stopSession() returns the assembled transcript
+      const myTurnId = voiceTurnCoordinator.startTurn();
       setOneShotPhase('transcribing');
       setLiveTranscriptOS({ user: '…', aura: '' });
       const transcript = await segmentedOneShot.stopSession();
+      if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
       if (!transcript) {
         notifyVoiceError('No speech detected. Try speaking closer to the microphone.');
         setOneShotPhase('idle'); setLiveTranscriptOS(null); return;
@@ -428,6 +443,7 @@ export function AuraVoiceCore({
       const chatResult = await openAIVoiceSessionService.createChatResponse(
         transcript, style, systemPrompt,
       );
+      if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
       if (!chatResult.success || !chatResult.text) {
         notifyVoiceError(chatResult.error ?? 'AI response failed.');
         setOneShotPhase('idle'); runningRef.current = false; return;
@@ -441,6 +457,7 @@ export function AuraVoiceCore({
       voiceTranscriptLogService.logTurn({ userText: transcript, auraText: chatResult.text, durationMs: elapsed, chatLatencyMs: chatResult.latencyMs });
       extractMemoryIfEnabled(transcript, chatResult.text);
       const ttsResult = await openAIVoiceSessionService.synthesizeSpeech(chatResult.text, voiceSettingsRef.current.ttsVoice);
+      if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
       if (!ttsResult.success || !ttsResult.audioBlobUrl) { setOneShotPhase('idle'); runningRef.current = false; return; }
       if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
       setCurrentAudioUrl(ttsResult.audioBlobUrl);
@@ -771,29 +788,29 @@ export function AuraVoiceCore({
                 conversationModeEnabled ? (
                   // ── Conversation mode controls ─────────────────────────────
                   loop.loopPhase === 'idle' || loop.loopPhase === 'dormant' ? (
-                    <button onClick={() => loop.startConversation()}
+                    <button onClick={throttled(() => loop.startConversation())}
                       className="flex items-center gap-2 px-6 py-2.5 rounded-2xl font-semibold text-[14px] bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 transition-all">
                       <PlayCircle className="w-4 h-4" />
                       {loop.loopPhase === 'dormant' ? 'Resume' : 'Start Conversation'}
                     </button>
                   ) : loop.loopPhase === 'speaking' ? (
                     <div className="flex items-center gap-2">
-                      <button onClick={() => loop.interruptSpeech()}
+                      <button onClick={throttled(() => loop.interruptSpeech())}
                         className="flex items-center gap-2 px-4 py-2.5 rounded-2xl font-semibold text-[13px] bg-rose-500/20 border border-rose-500/40 text-rose-300 shadow-lg transition-all hover:bg-rose-500/30">
                         <Mic className="w-4 h-4" /> Speak
                       </button>
-                      <button onClick={() => loop.stopConversation()}
+                      <button onClick={throttled(() => loop.stopConversation())}
                         className="flex items-center gap-2 px-4 py-2.5 rounded-2xl font-semibold text-[13px] bg-zinc-800 border border-zinc-700 text-zinc-300 shadow-lg transition-all hover:bg-zinc-700">
                         <StopCircle className="w-4 h-4" /> Stop
                       </button>
                     </div>
                   ) : loop.loopPhase === 'listening' ? (
                     <div className="flex items-center gap-2">
-                      <button onClick={() => loop.manualFinish()}
+                      <button onClick={throttled(() => loop.manualFinish())}
                         className="flex items-center gap-2 px-5 py-2.5 rounded-2xl font-semibold text-[13px] bg-rose-500 hover:bg-rose-400 text-white shadow-lg transition-all">
                         <Mic className="w-4 h-4" />Finish
                       </button>
-                      <button onClick={() => loop.stopConversation()}
+                      <button onClick={throttled(() => loop.stopConversation())}
                         className="flex items-center gap-2 px-4 py-2.5 rounded-2xl font-semibold text-[13px] bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-all">
                         <StopCircle className="w-3.5 h-3.5" />End
                       </button>
@@ -809,25 +826,25 @@ export function AuraVoiceCore({
                   oneShotPhase === 'speaking' ? (
                     <div className="flex items-center gap-2">
                       {voiceSettings.interruptEnabled && (
-                        <button onClick={handleOneShotStart}
+                        <button onClick={throttled(handleOneShotStart)}
                           className="flex items-center gap-2 px-4 py-2.5 rounded-2xl font-semibold text-[13px] bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/40 text-rose-300 shadow-lg transition-all">
                           <Mic className="w-4 h-4" /> Interrupt
                         </button>
                       )}
-                      <button onClick={handleStopPlayback}
+                      <button onClick={throttled(handleStopPlayback)}
                         className="flex items-center gap-2 px-4 py-2.5 rounded-2xl font-semibold text-[13px] bg-amber-600 hover:bg-amber-500 text-white shadow-lg transition-all">
                         <MicOff className="w-4 h-4" /> Skip
                       </button>
                     </div>
                   ) : oneShotPhase === 'recording' ? (
-                    <button onClick={handleOneShotStop}
+                    <button onClick={throttled(handleOneShotStop)}
                       className={cn('flex items-center gap-2 px-6 py-2.5 rounded-2xl font-semibold text-[14px] bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/30 shadow-lg transition-all',
                         !voiceSettings.autoStopEnabled && 'animate-pulse')}>
                       <Mic className="w-4 h-4" />
                       {vadPhase === 'speech_detected' ? 'Speaking…' : vadPhase === 'silence_detected' ? 'Paused…' : 'Finish'}
                     </button>
                   ) : (
-                    <button onClick={handleOneShotStart}
+                    <button onClick={throttled(handleOneShotStart)}
                       disabled={oneShotPhase !== 'idle' || micDenied || micUnsupported}
                       className={cn('flex items-center gap-2 px-6 py-2.5 rounded-2xl font-semibold text-[14px] shadow-lg transition-all',
                         (oneShotPhase !== 'idle' || micDenied || micUnsupported)

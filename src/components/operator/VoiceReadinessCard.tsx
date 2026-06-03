@@ -11,9 +11,10 @@
  */
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Mic2, CheckCircle2, XCircle, AlertCircle, Lock, Radio, AlertTriangle } from 'lucide-react';
+import { Mic2, CheckCircle2, XCircle, AlertCircle, Lock, Radio, AlertTriangle, Activity } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { voiceSessionService } from '../../services/voice/VoiceSessionService';
+import { voiceLatencyService } from '../../services/voice/VoiceLatencyService';
 import type { VoiceReadinessSnapshot, VoiceConversationSettings } from '../../types/voice-session';
 import { DEFAULT_VOICE_SETTINGS } from '../../types/voice-session';
 
@@ -27,6 +28,14 @@ export function VoiceReadinessCard() {
       return stored ? { ...DEFAULT_VOICE_SETTINGS, ...JSON.parse(stored) } : DEFAULT_VOICE_SETTINGS;
     } catch { return DEFAULT_VOICE_SETTINGS; }
   });
+  const [metricsSummary, setMetricsSummary] = useState<string>('No metrics yet');
+
+  useEffect(() => {
+    const unsub = voiceLatencyService.subscribe(() => {
+      setMetricsSummary(voiceLatencyService.formatLast());
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -308,16 +317,17 @@ export function VoiceReadinessCard() {
         ))}
       </div>
 
-      {/* Notes */}
-      {snap.notes.length > 0 && (
-        <div className="px-5 py-3 border-t border-zinc-800/30 space-y-1">
-          {snap.notes.map((n, i) => (
-            <p key={i} className="text-[10px] text-zinc-600 flex items-center gap-1">
-              <Radio className="w-2.5 h-2.5 shrink-0" />{n}
-            </p>
-          ))}
-        </div>
-      )}
+      {/* Notes & Metrics */}
+      <div className="px-5 py-3 border-t border-zinc-800/30 space-y-1">
+        <p className="text-[10px] text-zinc-500 font-mono flex items-center gap-1.5">
+          <Activity className="w-3 h-3" /> {metricsSummary}
+        </p>
+        {snap.notes.length > 0 && snap.notes.map((n, i) => (
+          <p key={i} className="text-[10px] text-zinc-600 flex items-center gap-1">
+            <Radio className="w-2.5 h-2.5 shrink-0" />{n}
+          </p>
+        ))}
+      </div>
     </div>
   );
 }

@@ -47,6 +47,11 @@ export interface VoiceLatencyMetrics {
   responseStyle: 'fast' | 'brief' | 'normal' | 'detailed';
   segmentedMode: boolean;
   sentenceFirstTTS: boolean;
+
+  /** Stage where the pipeline failed, if it did */
+  failureStage?: LatencyStage;
+  /** Whether a fallback path was used (e.g. fast-chat fallback to normal chat) */
+  fallbackPath?: boolean;
 }
 
 export type LatencyStage =
@@ -77,4 +82,6 @@ export interface LatencyContext {
   responseStyle: 'fast' | 'brief' | 'normal' | 'detailed';
   segmentedMode: boolean;
   sentenceFirstTTS: boolean;
+  failureStage?: LatencyStage;
+  fallbackPath?: boolean;
 }

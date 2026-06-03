@@ -28,13 +28,7 @@ export function TopBar() {
 
       {/* Right: keyboard hint + active agent */}
       <div className="flex items-center gap-3">
-        {/* Command palette hint */}
-        <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-zinc-600">
-          <Keyboard className="w-3.5 h-3.5" />
-          <kbd className="px-1.5 py-0.5 bg-zinc-800 text-zinc-500 rounded border border-zinc-700/50 text-[10px] font-mono">
-            Ctrl+K
-          </kbd>
-        </div>
+
 
         <div className="h-4 w-px bg-zinc-800 hidden sm:block" />
         

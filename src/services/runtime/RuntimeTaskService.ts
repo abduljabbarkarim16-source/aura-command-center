@@ -14,6 +14,10 @@ class RuntimeTaskServiceImpl {
   private listeners: Set<RuntimeTaskListener> = new Set();
   private readonly STORAGE_KEY = 'aura.runtimeTasks';
   private readonly MAX_TASKS = 200;
+  
+  private saveTimeout: number | null = null;
+  private pendingLogEmits: Set<string> = new Set();
+  private logEmitTimeout: number | null = null;
 
   constructor() {
     this.loadTasks();
@@ -52,15 +56,19 @@ class RuntimeTaskServiceImpl {
   }
 
   private saveTasks() {
-    try {
-      const allTasks = Array.from(this.tasks.values())
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .slice(0, this.MAX_TASKS);
-      
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(allTasks));
-    } catch (err) {
-      console.error('Failed to save runtime tasks to localStorage', err);
-    }
+    if (this.saveTimeout !== null) return;
+    this.saveTimeout = window.setTimeout(() => {
+      this.saveTimeout = null;
+      try {
+        const allTasks = Array.from(this.tasks.values())
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .slice(0, this.MAX_TASKS);
+        
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(allTasks));
+      } catch (err) {
+        console.error('Failed to save runtime tasks to localStorage', err);
+      }
+    }, 500);
   }
 
   // TASK LIFECYCLE CRUD
@@ -103,7 +111,18 @@ class RuntimeTaskServiceImpl {
     });
 
     this.saveTasks();
-    this.emit('task_log_appended', task);
+    
+    this.pendingLogEmits.add(id);
+    if (this.logEmitTimeout === null) {
+      this.logEmitTimeout = window.setTimeout(() => {
+        this.logEmitTimeout = null;
+        this.pendingLogEmits.forEach(taskId => {
+          const t = this.tasks.get(taskId);
+          if (t) this.emit('task_log_appended', t);
+        });
+        this.pendingLogEmits.clear();
+      }, 200);
+    }
   }
 
   completeTask(id: string, result?: any, summary?: string): RuntimeTask | null {

@@ -284,11 +284,20 @@ class OpenAIVoiceSessionServiceImpl {
         },
       };
     }
-    return {
-      success: false,
-      error: 'Realtime session requires Tauri backend bridge — not yet implemented.',
-      isDryRun: false,
-    };
+    try {
+      const session = await invoke<OpenAIRealtimeSessionResponse>('openai_realtime_ephemeral_token');
+      return {
+        success: true,
+        isDryRun: false,
+        session,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        error: String(err),
+        isDryRun: false,
+      };
+    }
   }
 }
 

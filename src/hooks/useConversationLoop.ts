@@ -25,6 +25,7 @@ import { auraMemoryService } from '../services/memory/AuraMemoryService';
 import { auraPersonalityService } from '../services/personality/AuraPersonalityService';
 import { auraToolDispatchService } from '../services/tools/AuraToolDispatchService';
 import { notifyVoiceError } from '../services/notifications/NotificationService';
+import { voiceTurnCoordinator } from '../services/voice/VoiceTurnCoordinator';
 import type { VoiceConversationSettings, VoiceConversationTurn } from '../types/voice-session';
 import type { VADPhase } from './useVoiceActivityRecorder';
 import type { VoiceLatencyMetrics } from '../types/voice-latency';
@@ -88,8 +89,8 @@ interface BargeInState {
   frameCount: number;
 }
 
-const BARGE_IN_THRESHOLD   = 0.025;  // Higher than VAD — avoids speaker echo
-const BARGE_IN_FRAME_GATE  = 4;      // N consecutive frames before triggering
+const BARGE_IN_MIN_THRESHOLD = 0.015; // Absolute floor for threshold
+const BARGE_IN_FRAME_GATE  = 8;      // N consecutive frames before triggering (longer to prevent false positives)
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
@@ -191,6 +192,8 @@ export function useConversationLoop(config: ConversationLoopConfig) {
       source.connect(analyser);
       const data = new Float32Array(analyser.fftSize);
       bargeInRef.current = { analyser, ctx, stream, frameCount: 0 };
+      const startMs = Date.now();
+      let adaptiveFloor = 0.05;
 
       bargeInPollRef.current = setInterval(() => {
         const bi = bargeInRef.current;
@@ -200,7 +203,16 @@ export function useConversationLoop(config: ConversationLoopConfig) {
         for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
         const rms = Math.sqrt(sum / data.length);
 
-        if (rms > BARGE_IN_THRESHOLD) {
+        // Cooldown: prevent instant speaker echo trigger
+        if (Date.now() - startMs < 500) {
+          return;
+        }
+
+        // Adaptive noise floor tracking
+        adaptiveFloor = Math.min(adaptiveFloor, rms);
+        const dynamicThreshold = Math.max(BARGE_IN_MIN_THRESHOLD, adaptiveFloor * 3.0);
+
+        if (rms > dynamicThreshold) {
           bi.frameCount++;
           if (bi.frameCount >= BARGE_IN_FRAME_GATE && loopPhaseRef.current === 'speaking') {
             stopBargeInAnalyser();
@@ -213,6 +225,8 @@ export function useConversationLoop(config: ConversationLoopConfig) {
           }
         } else {
           bi.frameCount = 0;
+          // Slowly decay floor up so it adapts to rising background noise
+          adaptiveFloor *= 1.001;
         }
       }, 100);
     } catch {
@@ -301,6 +315,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     const elapsed = recordStartRef.current ? Date.now() - recordStartRef.current : 0;
     clearDormancy();
     runningRef.current = true;
+    const myTurnId = voiceTurnCoordinator.startTurn();
 
     if (!transcript.trim()) {
       runningRef.current = false;
@@ -328,6 +343,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
 
     // Yield to let React paint the ack before the synchronous setup below
     await new Promise<void>(resolve => setTimeout(resolve, 0));
+    if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
 
     updatePhase('thinking');
 
@@ -347,6 +363,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     // ── PATH 1: Fast mode — 1-sentence reply first ─────────────────────────
     if (fastResponseModeRef.current) {
       const fastResult = await openAIVoiceSessionService.createFastChatResponse(transcript);
+      if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
       voiceLatencyService.markChatEnd(turnId);
 
       if (fastResult.success && fastResult.text) {
@@ -355,6 +372,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
         const fastTts = await openAIVoiceSessionService.synthesizeSpeech(
           fastResult.text, settingsRef.current.ttsVoice,
         );
+        if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
         voiceLatencyService.markTTSEnd(turnId);
 
         if (fastTts.success && fastTts.audioBlobUrl) {
@@ -373,6 +391,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
           const fullResult = await openAIVoiceSessionService.createChatResponse(
             transcript, style as 'brief' | 'normal' | 'detailed', systemPrompt,
           );
+          if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
           const fullText = fullResult.success ? fullResult.text ?? fastResult.text : fastResult.text;
           setLiveTranscript({ user: transcript, aura: fullText });
 
@@ -420,6 +439,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
             setLiveTranscript({ user: transcript, aura: `Running ${toolId}…` });
           },
         });
+        if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
         chatText = dispatchResult.text;
         toolUsed = dispatchResult.toolUsed;
         // Store in history manually since we bypassed the normal path
@@ -429,6 +449,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
         const fallback = await openAIVoiceSessionService.createChatResponse(
           transcript, style as 'brief' | 'normal' | 'detailed', systemPrompt,
         );
+        if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
         chatText = fallback.text ?? '';
         if (!fallback.success || !chatText) {
           notifyVoiceError(fallback.error ?? 'AI response failed.');
@@ -442,6 +463,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
       const chatResult = await openAIVoiceSessionService.createChatResponse(
         transcript, style as 'brief' | 'normal' | 'detailed', systemPrompt,
       );
+      if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
       if (!chatResult.success || !chatResult.text) {
         notifyVoiceError(chatResult.error ?? 'AI response failed.');
         runningRef.current = false;
@@ -482,6 +504,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
         const firstTts = await openAIVoiceSessionService.synthesizeSpeech(
           first, settingsRef.current.ttsVoice,
         );
+        if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
 
         if (firstTts.success && firstTts.audioBlobUrl) {
           voiceLatencyService.markTTSEnd(turnId);
@@ -506,6 +529,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
           firstAudio.onended = async () => {
             URL.revokeObjectURL(firstTts.audioBlobUrl!);
             const remainTts = await remainTtsPromise;
+            if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
             if (remainTts.success && remainTts.audioBlobUrl) {
               const remainAudio = new Audio(remainTts.audioBlobUrl);
               audioRef.current = remainAudio;
@@ -559,6 +583,7 @@ export function useConversationLoop(config: ConversationLoopConfig) {
     const ttsResult = await openAIVoiceSessionService.synthesizeSpeech(
       chatResult.text, settingsRef.current.ttsVoice,
     );
+    if (!voiceTurnCoordinator.isCurrent(myTurnId)) return;
     voiceLatencyService.markTTSEnd(turnId);
 
     const turn: VoiceConversationTurn = {

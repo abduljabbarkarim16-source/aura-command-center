@@ -141,7 +141,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceConversationSettings = {
   cleanupEnabled: true,
   removeFillerWords: true,
   // Phase 3F
-  fastResponseMode: false,
+  fastResponseMode: true,
   sentenceFirstTTS: true,
   fastAcknowledgementEnabled: true,
   autoMemoryEnabled: false,

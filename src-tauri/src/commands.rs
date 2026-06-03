@@ -15,6 +15,11 @@ use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::time::Instant;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 // ─── Allowlist ─────────────────────────────────────────────────────────────────
 
 /// Each allowed command is a (program, exact_args) tuple.
@@ -223,16 +228,20 @@ pub fn run_allowed_command(program: String, args: Vec<String>) -> CommandResult 
     // On Windows, we need to run npm via cmd /c for proper .cmd resolution.
     // But we do NOT allow arbitrary cmd usage — only for npm/git from the allowlist.
     let output = if cfg!(target_os = "windows") && program.eq_ignore_ascii_case("npm") {
-        Command::new("cmd")
-            .args(["/C", &program])
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", &program])
             .args(&args)
-            .current_dir(get_project_root())
-            .output()
+            .current_dir(get_project_root());
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.output()
     } else {
-        Command::new(&program)
-            .args(&args)
-            .current_dir(get_project_root())
-            .output()
+        let mut cmd = Command::new(&program);
+        cmd.args(&args)
+            .current_dir(get_project_root());
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.output()
     };
 
     let duration_ms = start.elapsed().as_millis() as u64;
@@ -301,7 +310,11 @@ pub fn check_command_available(program: String) -> CommandAvailability {
         "which"
     };
 
-    let output = Command::new(check_cmd).arg(&program).output();
+    let mut cmd = Command::new(check_cmd);
+    cmd.arg(&program);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let output = cmd.output();
 
     match output {
         Ok(output) if output.status.success() => {
@@ -376,7 +389,11 @@ pub fn check_cli_available(binary: String) -> CliAvailabilityResult {
     } else {
         "which"
     };
-    let output = Command::new(check_cmd).arg(&binary).output();
+    let mut cmd = Command::new(check_cmd);
+    cmd.arg(&binary);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let output = cmd.output();
 
     match output {
         Ok(out) if out.status.success() => {
