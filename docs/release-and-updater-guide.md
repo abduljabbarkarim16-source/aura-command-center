@@ -60,9 +60,9 @@ npm run tauri:build
 ```
 
 Because `"createUpdaterArtifacts": true` is set, Tauri will generate three important files in `src-tauri/target/release/bundle/msi/`:
-1. `AURA Command Center_0.5.1_x64_en-US.msi` (The actual installer)
-2. `AURA Command Center_0.5.1_x64_en-US.msi.zip` (The compressed update payload)
-3. `AURA Command Center_0.5.1_x64_en-US.msi.zip.sig` (The cryptographic signature)
+1. `AURA-Command-Center_0.5.1_x64_en-US.msi` (The actual installer)
+2. `AURA-Command-Center_0.5.1_x64_en-US.msi.zip` (The compressed update payload)
+3. `AURA-Command-Center_0.5.1_x64_en-US.msi.zip.sig` (The cryptographic signature)
 
 ## 5. Publishing to GitHub Releases
 
@@ -78,7 +78,7 @@ To push an update to your users:
   "platforms": {
     "windows-x86_64": {
       "signature": "CONTENTS_OF_THE_.sig_FILE",
-      "url": "https://github.com/abduljabbarkarim16-source/aura-command-center/releases/download/v0.5.1/AURA_Command_Center_0.5.1_x64_en-US.msi.zip"
+      "url": "https://github.com/abduljabbarkarim16-source/aura-command-center/releases/download/v0.5.1/AURA-Command-Center_0.5.1_x64_en-US.msi.zip"
     }
   }
 }
@@ -87,9 +87,10 @@ To push an update to your users:
 2. Create a new Release on your GitHub repository (e.g., tag `v0.5.1`).
 3. Upload the following files to the release assets:
    - `latest.json`
-   - `AURA Command Center_0.5.1_x64_en-US.msi`
-   - `AURA Command Center_0.5.1_x64_en-US.msi.zip`
-   - `AURA Command Center_0.5.1_x64_en-US.msi.zip.sig` (Optional, since the signature is in `latest.json`, but good for completeness).
+   - `AURA-Command-Center_0.5.1_x64_en-US.msi`
+   - `AURA-Command-Center_0.5.1_x64_en-US.msi.zip`
+   - `AURA-Command-Center_0.5.1_x64_en-US.msi.zip.sig` (Optional, since the signature is in `latest.json`, but good for completeness).
 
 > [!TIP]
 > Notice how the `endpoints` in `tauri.conf.json` points to `.../releases/latest/download/latest.json`. Because GitHub always redirects the `latest` tag to your newest release, the AURA app will automatically fetch the newest `latest.json` and know where to download the `.zip`.
+
