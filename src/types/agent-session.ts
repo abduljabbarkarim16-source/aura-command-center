@@ -23,6 +23,7 @@ export interface AgentSession {
   startedAt?: string;
   endedAt?: string;
   prompt?: string;
+  runtimeTaskId?: string;
   /** Streamed stdout/stderr lines, capped at 500 */
   outputLines: string[];
   exitCode?: number;

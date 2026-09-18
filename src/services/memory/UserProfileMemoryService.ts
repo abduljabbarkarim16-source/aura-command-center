@@ -14,6 +14,7 @@
 import type { UserProfile, VoicePreference, AutonomyPreference } from '../../types/aura-memory';
 import { auraPersonalityService } from '../personality/AuraPersonalityService';
 import { capabilityRegistryService } from '../capabilities/CapabilityRegistryService';
+import { persistentStore } from '../storage/PersistentStoreService';
 
 const STORAGE_KEY = 'aura.userProfile';
 
@@ -36,11 +37,14 @@ class UserProfileMemoryServiceImpl {
       }
     } catch { /* personality optional */ }
     this.registerCapability();
+    // Migrate from durable file store (recovers memory after reinstall).
+    this.migrateFromDurableStore();
   }
 
   private load(): UserProfile {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(STORAGE_KEY)
+        ?? localStorage.getItem(`persist:${STORAGE_KEY}`);
       if (raw) return { uiPreferences: {}, updatedAt: nowIso(), ...(JSON.parse(raw) as Partial<UserProfile>) } as UserProfile;
     } catch { /* ignore */ }
     return { uiPreferences: {}, updatedAt: nowIso() };
@@ -48,8 +52,27 @@ class UserProfileMemoryServiceImpl {
 
   private save() {
     this.profile.updatedAt = nowIso();
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.profile)); } catch { /* full */ }
+    const json = JSON.stringify(this.profile);
+    try { localStorage.setItem(STORAGE_KEY, json); } catch { /* full */ }
+    persistentStore.set(STORAGE_KEY, json).catch(() => { /* non-blocking */ });
     this.notify();
+  }
+
+  private async migrateFromDurableStore(): Promise<void> {
+    try {
+      const durable = await persistentStore.getJSON<UserProfile>(STORAGE_KEY);
+      if (!durable) return;
+      const hasLocal = !!localStorage.getItem(STORAGE_KEY);
+      if (!hasLocal && durable.name) {
+        this.profile = { uiPreferences: {}, updatedAt: nowIso(), ...durable };
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.profile)); } catch { /* full */ }
+        if (this.profile.name) {
+          try { auraPersonalityService.setUserName(this.profile.name); } catch { /* ignore */ }
+        }
+        this.notify();
+        this.registerCapability();
+      }
+    } catch { /* non-critical */ }
   }
 
   private registerCapability() {

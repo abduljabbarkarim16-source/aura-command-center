@@ -46,8 +46,8 @@ type SnapshotListener = (snapshot: VoiceRuntimeSnapshot) => void;
 // ─── Default mission ──────────────────────────────────────────────────────────
 
 const DEFAULT_MISSION: VoiceMission = {
-  name:     'AURA Internal Agent OS',
-  phase:    'Phase 3G',
+  name:     'AURA Operator UI',
+  phase:    'Phase 3J',
   progress:  90,
   agent:    'AURA',
 };

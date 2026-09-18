@@ -39,6 +39,21 @@ interface ChatHistoryMessage {
 
 const MAX_HISTORY_TURNS = 5;
 
+// ─── Transcription vocabulary hint ────────────────────────────────────────────
+// Passed to Whisper as `prompt` so domain terms and the operator's name transcribe
+// correctly (Whisper biases toward spellings it has just "seen" in the prompt).
+
+// Project-domain vocabulary for Whisper biasing — no user names here.
+// The saved name is appended dynamically at call time from UserProfileMemoryService.
+const TRANSCRIPTION_VOCAB =
+  'AURA, Claude, Codex, Antigravity, Tauri, Make.com, OpenAI, Whisper, Gemini, VAD, RuntimeTask, WebView2, ai-build-memory, agent-command-center';
+
+function buildTranscriptionPrompt(savedName?: string): string {
+  const base = `AURA operator console. Domain terms: ${TRANSCRIPTION_VOCAB}.`;
+  // Append the stored name so Whisper biases toward it — dynamic, not hardcoded.
+  return savedName?.trim() ? `${base} The operator's name is ${savedName.trim()}.` : base;
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 class OpenAIVoiceSessionServiceImpl {
@@ -56,19 +71,48 @@ class OpenAIVoiceSessionServiceImpl {
 
   // ── STT: transcribe audio via Tauri backend ───────────────────────────────
 
-  async transcribeAudio(audioBlob: Blob): Promise<VoiceTranscriptionResult> {
+  async transcribeAudio(audioBlob: Blob, promptOverride?: string): Promise<VoiceTranscriptionResult> {
     const start = Date.now();
-    try {
-      // Convert blob to byte array for Tauri transfer
-      const buffer = await audioBlob.arrayBuffer();
-      const audioBytes = Array.from(new Uint8Array(buffer));
-      const contentType = audioBlob.type || 'audio/webm';
 
+    // Build vocabulary hint (domain terms + saved name).
+    let prompt = promptOverride;
+    if (prompt === undefined) {
+      try {
+        const { userProfileMemoryService } = await import('../memory/UserProfileMemoryService');
+        prompt = buildTranscriptionPrompt(userProfileMemoryService.getDisplayName());
+      } catch {
+        prompt = buildTranscriptionPrompt();
+      }
+    }
+
+    const buffer = await audioBlob.arrayBuffer();
+    const audioBytes = Array.from(new Uint8Array(buffer));
+    const contentType = audioBlob.type || 'audio/webm';
+
+    // ── Try local Whisper first (free, private, often more accurate) ──────────
+    if ('__TAURI_INTERNALS__' in window) {
+      try {
+        const localText = await invoke<string>('local_transcribe_audio', {
+          audioBytes,
+          contentType,
+          prompt,
+        });
+        if (localText !== undefined && localText !== null) {
+          return { success: true, text: localText.trim(), latencyMs: Date.now() - start };
+        }
+      } catch {
+        // Local STT unavailable (faster-whisper not installed, script not found, etc.)
+        // Fall through to API path — no error surfaced to the user.
+      }
+    }
+
+    // ── Fall back to OpenAI Whisper API ───────────────────────────────────────
+    try {
       const text = await invoke<string>('openai_transcribe_audio', {
         audioBytes,
         contentType,
+        prompt,
       });
-
       return { success: true, text: text.trim(), latencyMs: Date.now() - start };
     } catch (err) {
       return { success: false, error: String(err), latencyMs: Date.now() - start };
@@ -157,17 +201,46 @@ class OpenAIVoiceSessionServiceImpl {
 
   // ── Sentence splitter ─────────────────────────────────────────────────────
   //
-  // Splits text into sentences for sentence-first TTS queuing.
-  // Returns at least one element.
+  // Splits text into sentences for parallel TTS synthesis queuing.
+  // Returns at least one element. Short fragments are merged into the next
+  // sentence so we don't fire too many tiny TTS requests.
 
   splitIntoSentences(text: string): string[] {
     if (!text.trim()) return [];
-    // Split on sentence-ending punctuation followed by space or end-of-string
-    const parts = text
+
+    // Collapse ellipsis (...) so it never triggers a false split.
+    const ELLIPSIS = '…';
+    const protected_ = text.replace(/\.{2,}/g, ELLIPSIS);
+
+    const raw = protected_
       .split(/(?<=[.!?])\s+/)
-      .map(s => s.trim())
+      .map(s => s.replace(new RegExp(ELLIPSIS, 'g'), '...').trim())
       .filter(Boolean);
-    return parts.length > 0 ? parts : [text.trim()];
+
+    if (raw.length === 0) return [text.trim()];
+
+    // Merge short leading/trailing fragments (< 40 chars) into the adjacent
+    // sentence to avoid hammering TTS with trivial one-word chunks.
+    const merged: string[] = [];
+    let buf = '';
+    for (const part of raw) {
+      buf = buf ? `${buf} ${part}` : part;
+      if (buf.length >= 40) {
+        merged.push(buf);
+        buf = '';
+      }
+    }
+    if (buf) {
+      // Append any leftover to the last merged sentence if it exists and is short,
+      // otherwise push as its own chunk.
+      if (merged.length > 0 && buf.length < 40) {
+        merged[merged.length - 1] += ` ${buf}`;
+      } else {
+        merged.push(buf);
+      }
+    }
+
+    return merged.length > 0 ? merged : [text.trim()];
   }
 
   // ── TTS: synthesize speech via Tauri backend ──────────────────────────────
@@ -179,15 +252,19 @@ class OpenAIVoiceSessionServiceImpl {
     if (!text.trim()) return { success: false, error: 'Empty text' };
     const start = Date.now();
     try {
-      const audioBytes = await invoke<number[]>('openai_synthesize_speech', {
+      const bytes = await invoke<number[]>('openai_synthesize_speech', {
         text: text.trim(),
         voice,
       });
 
-      const blob = new Blob([new Uint8Array(audioBytes)], { type: 'audio/mpeg' });
+      const uint8 = new Uint8Array(bytes);
+      // Return the underlying ArrayBuffer alongside the blob URL so the Web
+      // Audio API path can decode it directly without an extra fetch() call.
+      const audioBytes = uint8.buffer;
+      const blob = new Blob([uint8], { type: 'audio/mpeg' });
       const audioBlobUrl = URL.createObjectURL(blob);
 
-      return { success: true, audioBlobUrl, latencyMs: Date.now() - start };
+      return { success: true, audioBlobUrl, audioBytes, latencyMs: Date.now() - start };
     } catch (err) {
       return { success: false, error: String(err), latencyMs: Date.now() - start };
     }

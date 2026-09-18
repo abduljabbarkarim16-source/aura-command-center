@@ -1,9 +1,9 @@
 {
-  "version": "0.4.3",
-  "phase": "3G",
-  "phaseName": "Internal Agent Operating System",
-  "updated": "2026-05-31",
-  "agent": "Claude (Anthropic · claude-opus-4-8)",
+  "version": "0.6.1",
+  "phase": "3K",
+  "phaseName": "Self-Repair + Agent Handshake",
+  "updated": "2026-06-01",
+  "agent": "Codex (OpenAI / GPT-5)",
   "note": "Design-time manifest. Runtime status is refined by CapabilityRegistryService.test(); items marked 'testable' are confirmed live, not asserted here.",
   "capabilities": {
     "voice.shortSpeech": { "status": "available", "testable": false },
@@ -11,6 +11,10 @@
     "voice.conversationMode": { "status": "available", "testable": false },
     "voice.fastMode": { "status": "degraded", "testable": false, "limit": "~700ms request-based floor; needs Realtime API" },
     "voice.wakePhrase": { "status": "degraded", "testable": false, "limit": "WebView2 SpeechRecognition limitation" },
+    "visual.canvasShell": { "status": "available", "testable": false, "risk": "low" },
+    "visual.diagramTools": { "status": "available", "testable": true, "risk": "low" },
+    "visual.terminalOverlay": { "status": "available", "testable": true, "risk": "low", "limit": "RuntimeTask-backed or explicitly illustrative only" },
+    "visual.canvasTheme": { "status": "available", "testable": true, "risk": "low" },
     "terminal.gitStatus": { "status": "testable", "risk": "low" },
     "terminal.npmLint": { "status": "testable", "risk": "low" },
     "terminal.npmBuild": { "status": "testable", "risk": "medium", "approval": true },
@@ -21,6 +25,10 @@
     "cli.codexRunTiny": { "status": "approval-gated", "risk": "medium" },
     "agent.toolDispatch": { "status": "available", "testable": true },
     "agent.backgroundTasks": { "status": "available" },
+    "agent.backgroundHandshake": { "status": "available", "testable": true, "risk": "low" },
+    "agent.backgroundPrompt": { "status": "available", "testable": true, "risk": "medium", "approval": true },
+    "system.selfRepair": { "status": "available", "testable": true, "risk": "medium" },
+    "memory.repoEventLog": { "status": "available", "testable": true, "risk": "low", "limit": "writes only to local ai-build-memory/logs/agent-events.jsonl" },
     "memory.read": { "status": "testable" },
     "memory.write": { "status": "testable" },
     "memory.userProfile": { "status": "testable" },
@@ -40,7 +48,7 @@
   "nativeBridge": {
     "status": "active",
     "execution": "allowlisted commands only via run_allowed_command",
-    "workspaceResolution": "persisted AppData path → repo-marker walk-up → cwd fallback",
+    "workspaceResolution": "persisted AppData path -> repo-marker walk-up -> cwd fallback",
     "shell": "safe-allowlist-only",
     "rejects": ["arbitrary shell", "metacharacters", "git reset --hard", "non-allowlisted binaries"]
   },
@@ -58,7 +66,7 @@
     "centerConsoleAndVoice": true,
     "rightPanel": {
       "status": "active",
-      "tabs": ["tasks", "capabilities", "memory", "self-test", "logs"]
+      "tabs": ["activity", "tasks", "terminal", "logs", "memory", "capabilities", "recipes", "notifications", "details"]
     }
   },
   "commandPolicy": {

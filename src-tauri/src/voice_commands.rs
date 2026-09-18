@@ -29,21 +29,25 @@ const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024; // 25 MB — Whisper API actual
 const MIN_AUDIO_BYTES: usize = 3_000;
 const MAX_TEXT_LEN: usize = 4096;
 const MAX_SYSTEM_PROMPT_LEN: usize = 8_000;
-const MAX_RESPONSE_TOKENS: u32 = 300; // Phase 3D: raised from 150 to support detailed responses
+const MAX_RESPONSE_TOKENS: u32 = 1_000; // Phase 3K audit: raised from 300 — stop cutting off answers
 /// Ultra-low token budget for fast acknowledgement reply (1 sentence, ≤12 words).
 /// Cuts chat generation time from ~800-2000ms to ~200-500ms for the first spoken reply.
 const MAX_FAST_TOKENS: u32 = 40;
-const CHAT_MODEL: &str = "gpt-4o-mini";
-const TTS_MODEL: &str = "tts-1";
-const STT_MODEL: &str = "whisper-1";
+// Phase 3K model audit — upgraded from weaker defaults:
+//   whisper-1 → gpt-4o-transcribe: dramatically better on proper nouns and names
+//   gpt-4o-mini → gpt-4o: reliable tool calling, proper reasoning, doesn't fake actions
+//   tts-1 → tts-1-hd: better voice quality (ElevenLabs activates via VITE_ELEVENLABS_API_KEY)
+const CHAT_MODEL: &str = "gpt-4o";
+const TTS_MODEL: &str = "tts-1-hd";
+const STT_MODEL: &str = "gpt-4o-transcribe";
 
-/// Known Whisper hallucination substrings. Whisper was trained on YouTube videos and
-/// podcasts; when given silence or very low-energy audio it frequently hallucinates these.
-/// We reject any transcript that contains these patterns.
+/// Known hallucination substrings — Whisper/gpt-4o-transcribe on silence tends to
+/// output YouTube/podcast phrases or short looping fillers.
+/// Phase 3K+: expanded with gpt-4o-transcribe observed patterns on silence.
 const HALLUCINATION_SUBSTRINGS: &[&str] = &[
+    // YouTube/podcast hallucinations (Whisper training data)
     "thank you for watching",
     "thanks for watching",
-    "thank you for watching.",
     "please subscribe",
     "like and subscribe",
     "don't forget to subscribe",
@@ -54,46 +58,93 @@ const HALLUCINATION_SUBSTRINGS: &[&str] = &[
     "transcribed by",
     "captions by",
     "provided by",
+    // gpt-4o-transcribe observed silence hallucinations
+    "or a operator",
+    "the operator",
+    "or the operator",
+    // Common near-silence hallucinations
     "[music]",
     "[silence]",
     "[applause]",
     "[laughter]",
+    "[background noise]",
+    "[no audio]",
+    "[inaudible]",
+    "(music)",
+    "(silence)",
+    "(applause)",
 ];
 
-/// Returns true if the transcript looks like a Whisper hallucination rather than
-/// real speech. Checks two things:
-///   1. Known YouTube/podcast hallucination patterns
-///   2. No alphabetic characters at all (pure emoji / symbol output)
+/// Returns true if the transcript is almost certainly a hallucination.
+///
+/// Checks (in order):
+///   1. Known silence/podcast hallucination substrings
+///   2. Repetitive phrase loop — same short phrase repeated 3+ times
+///      (catches "or a operator or a operator..." regardless of exact phrase)
+///   3. Pure non-alphabetic output (emoji/symbol noise)
 fn is_likely_hallucination(text: &str) -> bool {
     let lower = text.to_lowercase();
+    let trimmed = lower.trim();
+
+    // 1. Known patterns
     for pattern in HALLUCINATION_SUBSTRINGS {
-        if lower.contains(pattern) {
+        if trimmed.contains(pattern) {
             return true;
         }
     }
-    // If the entire output has no alphabetic characters it is almost certainly hallucinated
-    // noise (e.g. a stream of emoji).
-    let has_alpha = lower.chars().any(|c| c.is_alphabetic());
-    if !has_alpha && !text.trim().is_empty() {
+
+    // 2. Repetitive phrase loop detector.
+    //    Split into words, then look for any window of 2-5 words that repeats
+    //    3 or more times consecutively — a strong sign of hallucination.
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    let word_count = words.len();
+    if word_count >= 6 {
+        'repetition: for phrase_len in 2usize..=5 {
+            if phrase_len * 3 > word_count { break 'repetition; }
+            let mut i = 0;
+            while i + phrase_len * 3 <= word_count {
+                let phrase = &words[i..i + phrase_len];
+                let mut repeats = 1usize;
+                let mut j = i + phrase_len;
+                while j + phrase_len <= word_count && &words[j..j + phrase_len] == phrase {
+                    repeats += 1;
+                    j += phrase_len;
+                }
+                if repeats >= 3 {
+                    return true;
+                }
+                i += 1;
+            }
+        }
+    }
+
+    // 3. No alphabetic characters at all
+    if !trimmed.is_empty() && !trimmed.chars().any(|c| c.is_alphabetic()) {
         return true;
     }
+
     false
 }
 
 // ─── System prompt ─────────────────────────────────────────────────────────────
-// Phase 3D: improved voice-first prompt with no filler phrases
+// Phase 3K+ audit: updated to match the frontend identity and remove the
+// contradictory "keep responses SHORT" cap that conflicted with the 1000-token
+// ceiling. The frontend always passes systemPromptOverride in normal usage;
+// this fallback fires only if the frontend fails to build/pass a prompt.
 
 const AURA_SYSTEM_PROMPT_BASE: &str =
-    "You are AURA, a concise voice assistant and AI desktop operator. \
-     You are speaking directly to the user through audio. \
+    "You are AURA — Autonomous Unified Reasoning Agent — a voice-first AI operator \
+     running as a native desktop application on Windows. \
+     You are the user's personal AI agent: run terminal commands, check project state, \
+     save and recall memory, verify capabilities, dispatch to CLI agents. \
+     You are actively being developed by the user. \
      Rules: \
-     - Respond as if speaking naturally, not writing. \
-     - Keep responses SHORT — 1 to 3 sentences maximum unless asked to elaborate. \
-     - Never use markdown, bullet points, or formatted lists. \
-     - Never say 'Certainly!' or 'Of course!' or similar filler phrases. \
-     - Ask one clarifying question at a time if you need more information. \
-     - Do not claim to perform actions you have not actually performed. \
-     - If you do not know something, say so clearly and briefly.";
+     - Speak directly. No 'Certainly!', 'Of course!', or filler openers. \
+     - Voice mode: no markdown, no bullet points — natural spoken sentences. \
+     - Never claim to have done something you have not done. \
+     - If you do not know something, say so and suggest how to find out. \
+     - When the user gives their name or preference, save it with the memory tools immediately. \
+     - Think before answering complex questions. You have a capable model — use it.";
 
 const RESPONSE_STYLE_BRIEF: &str = " Keep your response to 1 sentence. Be extremely concise.";
 const RESPONSE_STYLE_NORMAL: &str = " Aim for 2 to 3 sentences.";
@@ -157,6 +208,9 @@ fn truncate_utf8(text: &str, max_bytes: usize) -> &str {
 pub async fn openai_transcribe_audio(
     audio_bytes: Vec<u8>,
     content_type: String,
+    // Optional vocabulary/spelling hint (project terms + the user's name).
+    // Whisper uses this as context to bias toward correct spellings.
+    prompt: Option<String>,
 ) -> Result<String, String> {
     // ── Layer 1: Pre-flight size gate ─────────────────────────────────────────
     if audio_bytes.is_empty() {
@@ -204,12 +258,26 @@ pub async fn openai_transcribe_audio(
     // verbose_json gives us no_speech_prob per segment.
     // temperature=0 is deterministic — much less likely to hallucinate.
     // language=en avoids cross-language drift on noisy input.
-    let form = reqwest::multipart::Form::new()
+    // gpt-4o-transcribe only accepts "json" or "text" — not "verbose_json".
+    // whisper-1 accepts verbose_json (gives per-segment no_speech_prob).
+    // We detect which format to use based on the model name.
+    let response_fmt = if STT_MODEL.starts_with("gpt-4o") { "json" } else { "verbose_json" };
+
+    let mut form = reqwest::multipart::Form::new()
         .part("file", file_part)
         .text("model", STT_MODEL)
-        .text("response_format", "verbose_json")
+        .text("response_format", response_fmt)
         .text("temperature", "0")
         .text("language", "en");
+
+    // Optional vocabulary/spelling hint. Capped well under Whisper's ~224-token
+    // prompt budget so it biases spelling without crowding out the audio.
+    if let Some(p) = prompt {
+        let p = p.trim();
+        if !p.is_empty() {
+            form = form.text("prompt", truncate_utf8(p, 600).to_string());
+        }
+    }
 
     let res = client
         .post("https://api.openai.com/v1/audio/transcriptions")
@@ -732,4 +800,83 @@ pub async fn openai_synthesize_speech(
 
     let bytes = res.bytes().await.map_err(|e| e.to_string())?;
     Ok(bytes.to_vec())
+}
+
+// ─── Local STT (faster-whisper) ───────────────────────────────────────────────
+//
+// Calls the Python sidecar script scripts/local_stt.py with a temp audio file.
+// On success, returns the transcript text (same shape as openai_transcribe_audio).
+// On failure, returns Err so the frontend can fall back to the API path.
+//
+// AURA_STT_PROMPT env var is set before spawning so the script biases vocabulary.
+
+#[tauri::command]
+pub fn local_transcribe_audio(
+    audio_bytes: Vec<u8>,
+    content_type: String,
+    prompt: Option<String>,
+) -> Result<String, String> {
+    use std::io::Write;
+
+    if audio_bytes.is_empty() {
+        return Err("Audio bytes are empty".to_string());
+    }
+
+    // Write audio to a temp file
+    let ext = if content_type.contains("wav") { "wav" } else if content_type.contains("mp4") || content_type.contains("m4a") { "m4a" } else { "webm" };
+    let tmp_path = std::env::temp_dir().join(format!("aura_stt_{}.{ext}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()));
+    {
+        let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("Cannot write temp audio: {e}"))?;
+        f.write_all(&audio_bytes).map_err(|e| format!("Cannot write audio bytes: {e}"))?;
+    }
+
+    // Resolve path to local_stt.py relative to the executable (installed app)
+    // or CWD (dev mode).
+    let script = {
+        let exe_rel = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("scripts").join("local_stt.py")))
+            .filter(|p| p.exists());
+        let cwd_rel = std::env::current_dir()
+            .ok()
+            .map(|d| d.join("scripts").join("local_stt.py"))
+            .filter(|p| p.exists());
+        exe_rel.or(cwd_rel)
+    };
+
+    let script = match script {
+        Some(s) => s,
+        None => {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err("local_stt.py not found — local STT unavailable".to_string());
+        }
+    };
+
+    // Spawn python with the script
+    let mut cmd = std::process::Command::new("python");
+    cmd.arg(&script)
+       .arg(tmp_path.to_string_lossy().as_ref())
+       .arg("en");
+    if let Some(p) = &prompt {
+        cmd.env("AURA_STT_PROMPT", p);
+    }
+
+    let output = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output();
+
+    let _ = std::fs::remove_file(&tmp_path); // always clean up
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let text = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            Ok(text)
+        }
+        Ok(o) => {
+            let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            Err(format!("Local STT failed: {err}"))
+        }
+        Err(e) => Err(format!("Local STT spawn error: {e}")),
+    }
 }

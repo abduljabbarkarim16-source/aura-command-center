@@ -15,12 +15,14 @@ import { invoke } from '@tauri-apps/api/core';
 import type { ToolDefinition, ToolExecution } from '../../types/tools';
 import { cliSessionService } from '../agents/CliSessionService';
 import { cliDiscoveryService } from '../agents/CliDiscoveryService';
+import { agentBridgeService } from '../agents/AgentBridgeService';
 import { permissionModeService } from '../permissions/PermissionModeService';
 import { runtimeTaskService } from '../runtime/RuntimeTaskService';
 import type { RuntimeTaskType, RuntimeTask } from '../../types/runtime-task';
 import { ToolResultNormalizer } from './ToolResultNormalizer';
 import type { ToolResult } from '../../types/tool-result';
 import { incidentService } from '../testing/IncidentService';
+import { visualShellStateService } from '../visual/VisualShellStateService';
 
 function uid(): string {
   return `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -143,6 +145,57 @@ export const TOOL_CATALOG: ToolDefinition[] = [
   },
   // ── Memory tools (JS-native, local only) ───────────────────────────────
   {
+    id: 'agent.handshakeAllBackground',
+    name: 'Background agent handshake',
+    description: 'Send real sentinel prompts to all detected CLI agents in the background and return session/task ids immediately.',
+    category: 'cli_agent',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: [],
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'agent.sendPromptBackground',
+    name: 'Send agent prompt in background',
+    description: 'Send a prompt to a connected CLI agent as a background RuntimeTask. Use only when the user asks to hand work to an agent.',
+    category: 'cli_agent',
+    risk: 'medium',
+    requiresApproval: false,
+    allowedInputKeys: ['agent', 'prompt'],
+    inputDescriptions: {
+      agent: 'Target CLI agent: claude or codex.',
+      prompt: 'Short prompt to send. Do not include secrets, API keys, or private credentials.',
+    },
+    blockedInputPatterns: ['`', '$', '\\'],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'agent.getSession',
+    name: 'Get agent session',
+    description: 'Read the status and latest output for a background CLI agent session.',
+    category: 'cli_agent',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: ['sessionId'],
+    inputDescriptions: {
+      sessionId: 'Agent session id returned by a background handshake or prompt.',
+    },
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'agent.listSessions',
+    name: 'List agent sessions',
+    description: 'List recent CLI agent sessions with status, task id, and short output preview.',
+    category: 'cli_agent',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: [],
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
+  {
     id: 'memory.rememberFact',
     name: 'Remember a fact',
     description: "Save a durable fact (e.g. a preference or project detail) to AURA's local memory. Use category 'personal' for facts about the user, 'task' for project/work facts.",
@@ -226,6 +279,104 @@ export const TOOL_CATALOG: ToolDefinition[] = [
     description: "Produce an honest report of what AURA can't do yet and what it would take.",
     category: 'capability', risk: 'low', requiresApproval: false,
     allowedInputKeys: [], blockedInputPatterns: [], timeoutMs: 5_000,
+  },
+  // Visual shell tools. These only control local UI state; they never execute commands.
+  {
+    id: 'visual.showDiagram',
+    name: 'Show canvas diagram',
+    description: 'Render a structured diagram on the AURA canvas. Use this for workflows, architecture, task plans, comparisons, and visual explanations.',
+    category: 'visual',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: ['title', 'description', 'layoutMode', 'themeColor', 'nodesJson', 'edgesJson'],
+    inputDescriptions: {
+      title: 'Diagram title.',
+      description: 'Short diagram subtitle or explanation.',
+      layoutMode: 'One of grid, list, flow, bento.',
+      themeColor: 'Theme color name such as indigo, cyan, emerald, amber, rose, violet, zinc.',
+      nodesJson: 'JSON array of nodes: [{ "label": "...", "detail": "...", "emoji": "...", "color": "cyan", "status": "running" }]. Keep to 3-8 nodes.',
+      edgesJson: 'Optional JSON array of flow edges: [{ "from": "node-id-or-label", "to": "node-id-or-label", "label": "..." }].',
+    },
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'visual.closeDiagram',
+    name: 'Close canvas diagram',
+    description: 'Close the current canvas diagram and return the visual shell to normal voice/task state.',
+    category: 'visual',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: [],
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'visual.showTerminalVisual',
+    name: 'Show terminal visual',
+    description: 'Show a floating terminal visual. Prefer providing a real RuntimeTask taskId. Without a real task, it is marked illustrative and must not pretend a command ran.',
+    category: 'visual',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: ['taskId', 'command'],
+    inputDescriptions: {
+      taskId: 'Optional real RuntimeTask id. Required for real terminal logs.',
+      command: 'Optional display label if no RuntimeTask exists; no command will be executed by this visual tool.',
+    },
+    blockedInputPatterns: ['`', '$', '|', '&', ';'],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'visual.closeTerminalVisual',
+    name: 'Close terminal visual',
+    description: 'Close the floating terminal visual without affecting the underlying RuntimeTask history.',
+    category: 'visual',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: [],
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'visual.setCanvasTheme',
+    name: 'Set canvas theme',
+    description: 'Set the visual shell accent color, icon marker, and optional status message.',
+    category: 'visual',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: ['themeColor', 'accentIcon', 'message'],
+    inputDescriptions: {
+      themeColor: 'Theme color name such as indigo, cyan, emerald, amber, rose, violet, zinc.',
+      accentIcon: 'Short icon or emoji-like marker. Keep it compact.',
+      message: 'Short status message to display on the canvas.',
+    },
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'visual.focusTask',
+    name: 'Focus runtime task',
+    description: 'Focus the canvas on an existing RuntimeTask. Terminal and CLI tasks can show their real logs in the terminal visual.',
+    category: 'visual',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: ['taskId'],
+    inputDescriptions: {
+      taskId: 'Existing RuntimeTask id to focus.',
+    },
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
+  },
+  {
+    id: 'visual.resetCanvas',
+    name: 'Reset canvas',
+    description: 'Clear active visual shell diagram, terminal visual, focused task, theme override, and message.',
+    category: 'visual',
+    risk: 'low',
+    requiresApproval: false,
+    allowedInputKeys: [],
+    blockedInputPatterns: [],
+    timeoutMs: 5_000,
   },
 ];
 
@@ -321,6 +472,7 @@ class ToolRegistryServiceImpl {
       else if (tool.category === 'cli_agent') taskType = 'cli';
       else if (tool.category === 'memory') taskType = 'memory';
       else if (tool.category === 'capability') taskType = 'capability';
+      else if (tool.category === 'visual') taskType = 'visual';
 
       runtimeTask = runtimeTaskService.createTask({
         title: `Tool: ${tool.name}`,
@@ -466,6 +618,66 @@ class ToolRegistryServiceImpl {
     }
 
     // ── CLI run tools ───────────────────────────────────────────────────
+    if (tool.id === 'agent.handshakeAllBackground') {
+      const launches = await agentBridgeService.handshakeAllBackground();
+      const output = launches.length > 0
+        ? launches.map(l => `${l.agentId}: session ${l.sessionId}, task ${l.taskId}`).join('\n')
+        : 'No detected CLI agents to handshake with.';
+      return { output, exitCode: launches.length > 0 ? 0 : 1, durationMs: Date.now() - start };
+    }
+
+    if (tool.id === 'agent.sendPromptBackground') {
+      const agent = (inputs['agent'] ?? '').trim().toLowerCase();
+      const prompt = (inputs['prompt'] ?? '').trim();
+      if (agent !== 'claude' && agent !== 'codex') {
+        return { output: 'Target agent must be claude or codex.', exitCode: 1, durationMs: Date.now() - start };
+      }
+      if (!prompt) {
+        return { output: 'No prompt provided.', exitCode: 1, durationMs: Date.now() - start };
+      }
+      const launch = await agentBridgeService.sendPromptBackground(agent, prompt);
+      return {
+        output: `${agent} background prompt started. Session: ${launch.sessionId}. RuntimeTask: ${launch.taskId}.`,
+        exitCode: 0,
+        durationMs: Date.now() - start,
+      };
+    }
+
+    if (tool.id === 'agent.getSession') {
+      const sessionId = (inputs['sessionId'] ?? '').trim();
+      const session = sessionId ? cliSessionService.getSession(sessionId) : undefined;
+      if (!session) {
+        return { output: sessionId ? `Session not found: ${sessionId}` : 'No session id provided.', exitCode: 1, durationMs: Date.now() - start };
+      }
+      return {
+        output: JSON.stringify({
+          id: session.id,
+          cli: session.cli,
+          status: session.status,
+          runtimeTaskId: session.runtimeTaskId,
+          exitCode: session.exitCode,
+          errorSummary: session.errorSummary,
+          usageLimitMessage: session.usageLimitMessage,
+          output: session.outputLines.slice(-40).join('\n'),
+        }, null, 2),
+        exitCode: session.status === 'error' || session.status === 'usage_limit' ? 1 : 0,
+        durationMs: Date.now() - start,
+      };
+    }
+
+    if (tool.id === 'agent.listSessions') {
+      const sessions = cliSessionService.getSessions().slice(0, 10).map(s => ({
+        id: s.id,
+        cli: s.cli,
+        status: s.status,
+        runtimeTaskId: s.runtimeTaskId,
+        startedAt: s.startedAt,
+        endedAt: s.endedAt,
+        preview: s.outputLines.slice(-3).join('\n').slice(0, 240),
+      }));
+      return { output: JSON.stringify(sessions, null, 2), exitCode: 0, durationMs: Date.now() - start };
+    }
+
     if (tool.id === 'cli.claudeRunTiny' || tool.id === 'cli.codexRunTiny') {
       const cli = tool.id === 'cli.claudeRunTiny' ? 'claude' : 'codex';
       const prompt = inputs['prompt'] ?? 'Reply exactly with: AURA_CLI_OK';
@@ -476,7 +688,7 @@ class ToolRegistryServiceImpl {
     }
 
     // ── Memory + capability tools (JS-native, no Rust) ──────────────────
-    if (tool.category === 'memory' || tool.category === 'capability') {
+    if (tool.category === 'memory' || tool.category === 'capability' || tool.category === 'visual') {
       return this.runNativeTool(tool.id, inputs, start);
     }
 
@@ -484,7 +696,7 @@ class ToolRegistryServiceImpl {
   }
 
   /**
-   * Execute JS-native tools (memory.*, capabilities.*).
+   * Execute JS-native tools (memory.*, capabilities.*, visual.*).
    * Uses lazy dynamic imports to avoid a module-load cycle with
    * CapabilityRegistryService (which imports this registry).
    */
@@ -562,6 +774,40 @@ class ToolRegistryServiceImpl {
       case 'capabilities.gapReport': {
         const { capabilityGapService } = await import('../capabilities/CapabilityGapService');
         return done(capabilityGapService.report().text);
+      }
+      case 'visual.showDiagram': {
+        visualShellStateService.showDiagramFromTool(inputs);
+        return done('Canvas diagram shown.');
+      }
+      case 'visual.closeDiagram': {
+        visualShellStateService.closeDiagram();
+        return done('Canvas diagram closed.');
+      }
+      case 'visual.showTerminalVisual': {
+        const taskId = (inputs['taskId'] ?? '').trim();
+        const task = taskId ? runtimeTaskService.getTask(taskId) : undefined;
+        visualShellStateService.showTerminalVisualFromTool(inputs);
+        if (task) return done('Terminal visual shown from RuntimeTask.');
+        if (taskId) return done(`RuntimeTask not found: ${taskId}. Illustrative terminal visual shown without executing a command.`, 1);
+        return done('Illustrative terminal visual shown without executing a command.');
+      }
+      case 'visual.closeTerminalVisual': {
+        visualShellStateService.closeTerminalVisual();
+        return done('Terminal visual closed.');
+      }
+      case 'visual.setCanvasTheme': {
+        visualShellStateService.setCanvasTheme(inputs['themeColor'], inputs['accentIcon'], inputs['message']);
+        return done('Canvas theme updated.');
+      }
+      case 'visual.focusTask': {
+        const taskId = (inputs['taskId'] ?? '').trim();
+        const task = taskId ? runtimeTaskService.getTask(taskId) : undefined;
+        visualShellStateService.focusTaskFromTool(inputs);
+        return task ? done('Canvas task focus updated.') : done(taskId ? `Task not found: ${taskId}.` : 'No task id provided.', 1);
+      }
+      case 'visual.resetCanvas': {
+        visualShellStateService.resetCanvas();
+        return done('Canvas reset.');
       }
       default:
         throw new Error(`No native executor for tool: ${toolId}`);

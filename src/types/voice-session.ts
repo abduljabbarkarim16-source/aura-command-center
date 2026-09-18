@@ -93,6 +93,7 @@ export interface VoiceChatResult {
 export interface VoiceSpeechResult {
   success: boolean;
   audioBlobUrl?: string;  // Object URL — caller revokes after playback
+  audioBytes?: ArrayBuffer; // Raw MP3 bytes — used by Web Audio API decoder to skip fetch round-trip
   latencyMs?: number;
   error?: string;
 }

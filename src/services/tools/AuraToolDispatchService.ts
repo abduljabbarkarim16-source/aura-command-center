@@ -29,7 +29,7 @@ import type { RuntimeTaskType } from '../../types/runtime-task';
 function toOpenAITool(tool: ToolDefinition) {
   const properties: Record<string, unknown> = {};
   for (const key of tool.allowedInputKeys) {
-    properties[key] = { type: 'string', description: `Input: ${key}` };
+    properties[key] = { type: 'string', description: tool.inputDescriptions?.[key] ?? `Input: ${key}` };
   }
   return {
     type: 'function',
@@ -166,6 +166,7 @@ class AuraToolDispatchServiceImpl {
     else if (tool.category === 'cli_agent') taskType = 'cli';
     else if (tool.category === 'memory') taskType = 'memory';
     else if (tool.category === 'capability') taskType = 'capability';
+    else if (tool.category === 'visual') taskType = 'visual';
 
     const task = runtimeTaskService.createTask({
       title: `Tool: ${tool.name}`,

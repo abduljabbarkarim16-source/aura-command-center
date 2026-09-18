@@ -1,6 +1,7 @@
 mod cli_commands;
 mod commands;
 mod config_commands;
+mod persist_commands;
 mod voice_commands;
 
 // Walk up the directory tree from `start`, trying to load a `.env` file.
@@ -49,7 +50,9 @@ fn load_dotenv() {
     // 4. Try common dev-environment project paths under %USERPROFILE%\Documents
     if let Ok(home) = std::env::var("USERPROFILE") {
         let roots = [
+            "Documents\\AURA\\agent-command-center-phase-3j",
             "Documents\\AURA\\agent-command-center",
+            "Documents\\aura\\agent-command-center-phase-3j",
             "Documents\\aura\\agent-command-center",
             "aura-command-center",
         ];
@@ -87,6 +90,7 @@ pub fn run() {
             commands::check_cli_available,
             commands::get_workspace_path,
             commands::set_workspace_path,
+            commands::append_memory_repo_event,
             config_commands::save_openai_key,
             config_commands::openai_key_is_configured,
             config_commands::delete_openai_key,
@@ -97,8 +101,13 @@ pub fn run() {
             voice_commands::openai_chat_tool_result,
             voice_commands::openai_extract_memory,
             voice_commands::openai_synthesize_speech,
+            voice_commands::local_transcribe_audio,
             cli_commands::spawn_agent_session,
             cli_commands::get_cli_help,
+            persist_commands::persist_read,
+            persist_commands::persist_write,
+            persist_commands::persist_delete,
+            persist_commands::persist_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

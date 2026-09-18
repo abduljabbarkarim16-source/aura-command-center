@@ -12,7 +12,11 @@
 //! - stdout/stderr are captured and returned as structured data
 
 use serde::{Deserialize, Serialize};
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::PathBuf;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::time::Instant;
 
 // ─── Allowlist ─────────────────────────────────────────────────────────────────
@@ -163,13 +167,26 @@ fn is_allowed_command(program: &str, args: &[String]) -> Option<&'static Allowed
     })
 }
 
+fn command_working_dir(project_root: &str, program: &str) -> PathBuf {
+    let root = PathBuf::from(project_root);
+    if program.eq_ignore_ascii_case("cargo") {
+        let tauri_dir = root.join("src-tauri");
+        if tauri_dir.join("Cargo.toml").exists() {
+            return tauri_dir;
+        }
+    }
+    root
+}
+
 // ─── Tauri commands ────────────────────────────────────────────────────────────
 
 /// Run a command from the strict allowlist.
 /// Rejects anything not in the list, any blocked executable, and any metacharacters.
 #[tauri::command]
 pub fn run_allowed_command(program: String, args: Vec<String>) -> CommandResult {
-    let resolved_cwd = get_project_root();
+    let project_root = get_project_root();
+    let cwd_path = command_working_dir(&project_root, &program);
+    let resolved_cwd = cwd_path.to_string_lossy().to_string();
 
     // 1. Check for blocked executable
     if is_blocked_executable(&program) {
@@ -226,17 +243,17 @@ pub fn run_allowed_command(program: String, args: Vec<String>) -> CommandResult 
         Command::new("cmd")
             .args(["/C", &program])
             .args(&args)
-            .current_dir(get_project_root())
+            .current_dir(&cwd_path)
             .output()
     } else {
         Command::new(&program)
             .args(&args)
-            .current_dir(get_project_root())
+            .current_dir(&cwd_path)
             .output()
     };
 
     let duration_ms = start.elapsed().as_millis() as u64;
-    let cwd_used = get_project_root();
+    let cwd_used = resolved_cwd;
 
     match output {
         Ok(output) => CommandResult {
@@ -424,7 +441,7 @@ fn get_persisted_workspace_path() -> Option<std::path::PathBuf> {
 ///
 /// Resolution order (installed app aware):
 ///   1. Persisted workspace path from AppData config (user-set)
-///   2. Well-known AURA repo location: %USERPROFILE%\Documents\AURA\agent-command-center
+///   2. Well-known AURA repo locations under %USERPROFILE%\Documents\AURA
 ///   3. Current directory walk-up (finds package.json)
 ///   4. Executable directory walk-up (dev mode)
 ///   5. Current directory as last resort
@@ -436,9 +453,13 @@ fn get_project_root() -> String {
 
     // 2. Well-known default AURA repo location on this machine
     let known_paths = [
+        "Documents\\AURA\\agent-command-center-phase-3j",
         "Documents\\AURA\\agent-command-center",
+        "Documents\\aura\\agent-command-center-phase-3j",
         "Documents\\aura\\agent-command-center",
+        "AURA\\agent-command-center-phase-3j",
         "AURA\\agent-command-center",
+        "aura\\agent-command-center-phase-3j",
         "aura\\agent-command-center",
     ];
     if let Ok(home) = std::env::var("USERPROFILE") {
@@ -539,6 +560,99 @@ pub fn set_workspace_path(path: String) -> Result<String, String> {
     }
 
     Err("Could not access AppData directory".into())
+}
+
+fn find_ai_build_memory_repo() -> Option<PathBuf> {
+    if let Ok(home) = std::env::var("USERPROFILE") {
+        let candidate = PathBuf::from(home)
+            .join("Documents")
+            .join("AURA")
+            .join("ai-build-memory");
+        if candidate.join(".git").exists() && candidate.join("logs").exists() {
+            return Some(candidate);
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut dir = cwd;
+        for _ in 0..8 {
+            let candidate = dir.join("ai-build-memory");
+            if candidate.join(".git").exists() && candidate.join("logs").exists() {
+                return Some(candidate);
+            }
+            if let Some(parent) = dir.parent() {
+                dir = parent.to_path_buf();
+            } else {
+                break;
+            }
+        }
+    }
+
+    None
+}
+
+fn clean_memory_field(value: &str, max_chars: usize) -> String {
+    value
+        .replace(['\r', '\n', '\t'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(max_chars)
+        .collect()
+}
+
+/// Append a small, controlled event to the local ai-build-memory repo.
+///
+/// This is intentionally narrow: it writes only to logs/agent-events.jsonl in
+/// the known local memory repo and never accepts a caller-provided filesystem
+/// path. It is for self-diagnostic/repair notes, not arbitrary file edits.
+#[tauri::command]
+pub fn append_memory_repo_event(
+    event_type: String,
+    summary: String,
+    details: String,
+) -> Result<String, String> {
+    let event_type = clean_memory_field(&event_type, 80);
+    if event_type.is_empty()
+        || !event_type
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+    {
+        return Err("Invalid event_type for memory repo event".into());
+    }
+
+    let repo = find_ai_build_memory_repo()
+        .ok_or_else(|| "Could not find local ai-build-memory repo".to_string())?;
+    let logs_dir = repo.join("logs");
+    std::fs::create_dir_all(&logs_dir).map_err(|e| format!("Could not create memory logs dir: {e}"))?;
+    let log_path = logs_dir.join("agent-events.jsonl");
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("Clock error: {e}"))?
+        .as_millis();
+
+    let entry = serde_json::json!({
+        "timestamp_unix_ms": now_ms,
+        "source": "AURA Command Center",
+        "agent": {
+            "name": "AURA",
+            "provider": "local",
+            "role": "self-diagnostic"
+        },
+        "event_type": event_type,
+        "summary": clean_memory_field(&summary, 500),
+        "details": clean_memory_field(&details, 2_000)
+    });
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| format!("Could not open memory repo log: {e}"))?;
+    writeln!(file, "{entry}").map_err(|e| format!("Could not append memory repo log: {e}"))?;
+
+    Ok(log_path.to_string_lossy().to_string())
 }
 
 #[cfg(test)]

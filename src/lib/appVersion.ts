@@ -1,25 +1,51 @@
 /**
- * AURA version constants — updated each phase.
+ * AURA version constants - updated each phase.
  * Displayed in Settings and Dashboard so every build is identifiable.
  *
  * Version scheme:
- *   0.1.x  — Phase 1  (UI architecture)
- *   0.2.x  — Phase 2  (foundation, persistence, relay, command policy)
- *   0.3.x  — Phase 3  (live providers, self-build, voice)
- *   0.3.0  — Phase 3A (live connection verification)
- *   0.3.1  — Phase 3B (self-build dry run, voice foundation)
- *   0.3.2  — Phase 3C (voice conversation MVP — STT/Chat/TTS via Tauri backend)
+ *   0.1.x  - Phase 1  (UI architecture)
+ *   0.2.x  - Phase 2  (foundation, persistence, relay, command policy)
+ *   0.3.x  - Phase 3  (live providers, self-build, voice)
+ *   0.6.x  - Phase 3K (Aura UI visual shell)
+ *   0.3.0  - Phase 3A (live connection verification)
+ *   0.3.1  - Phase 3B (self-build dry run, voice foundation)
+ *   0.3.2  - Phase 3C (voice conversation MVP - STT/Chat/TTS via Tauri backend)
  */
 
-export const APP_VERSION = '0.5.0';
-export const APP_PHASE   = 'Phase 3H';
-export const APP_PHASE_LABEL = 'Runtime Nervous System';
-export const BUILD_DATE  = '2026-05-31';
+export const APP_VERSION = '0.6.1';
+export const APP_PHASE   = 'Phase 3K Self-Repair';
+export const APP_PHASE_LABEL = 'Agent Handshake + Diagnostic Repair';
+export const BUILD_DATE  = '2026-06-01';
+
+/**
+ * Build provenance - injected at build time by vite.config.ts `define`.
+ * This is the fix for the 0.5.0-vs-0.5.0 installer ambiguity that hid the
+ * Phase 3J UI: every build now carries its exact commit SHA and build time,
+ * shown in Settings -> Details, so the user can confirm which build is live.
+ */
+declare const __APP_BUILD_SHA__: string;
+declare const __APP_BUILD_BRANCH__: string;
+declare const __APP_BUILD_TIME__: string;
+
+export const BUILD_SHA    = typeof __APP_BUILD_SHA__    !== 'undefined' ? __APP_BUILD_SHA__    : 'dev';
+export const BUILD_BRANCH = typeof __APP_BUILD_BRANCH__ !== 'undefined' ? __APP_BUILD_BRANCH__ : 'unknown';
+export const BUILD_TIME   = typeof __APP_BUILD_TIME__   !== 'undefined' ? __APP_BUILD_TIME__   : '';
 
 /** Full display string shown in Settings header and About chip */
-export const VERSION_DISPLAY = `v${APP_VERSION} · ${APP_PHASE}`;
+export const VERSION_DISPLAY = `v${APP_VERSION} / ${APP_PHASE}`;
 
-/** Changelog — newest entry first */
+/**
+ * Compact, copyable build marker for the Details panel.
+ * e.g. "v0.6.1 - Phase 3K Self-Repair - a1b2c3d - 2026-06-01 14:22"
+ */
+export const BUILD_MARKER = [
+  `v${APP_VERSION}`,
+  APP_PHASE,
+  BUILD_SHA,
+  BUILD_TIME ? BUILD_TIME.slice(0, 16).replace('T', ' ') : BUILD_DATE,
+].join(' - ');
+
+/** Changelog - newest entry first */
 export interface ChangelogEntry {
   version: string;
   phase:   string;
@@ -30,6 +56,73 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version:  '0.6.1',
+    phase:    'Phase 3K Self-Repair',
+    date:     '2026-06-01',
+    summary:  'Agent Handshake + Diagnostic Repair',
+    highlights: [
+      'Agent handshake now sends real Claude/Codex sentinel prompts as background RuntimeTasks',
+      'AURA can send approved background prompts to connected CLI agents and inspect session output',
+      'Full system diagnostic now runs Rust tests from src-tauri and uses the correct capability input key',
+      'Added repair-last-diagnostic flow: analyze failures, log repair memory, rerun the full diagnostic',
+      'Safe repair notes are written to durable AURA memory and the local ai-build-memory event log when available',
+    ],
+  },
+  {
+    version:  '0.6.0',
+    phase:    'Phase 3K Visual Shell',
+    date:     '2026-06-01',
+    summary:  'Aura UI Visual Shell Port',
+    highlights: [
+      'Aura-ui canvas/orb visual shell ported into the real AURA desktop runtime',
+      'Voice Core now uses a layered canvas-first surface driven by real voice and RuntimeTask state',
+      'AI-callable visual tools can show diagrams, focus tasks, set canvas theme, and reset the canvas',
+      'Terminal visuals are RuntimeTask-backed or clearly marked illustrative; they never invent command output',
+      'Existing Tauri, voice, memory, permission, notification, and right-panel systems remain authoritative',
+    ],
+  },
+  {
+    version:  '0.5.2',
+    phase:    'Phase 3K',
+    date:     '2026-05-31',
+    summary:  'Local Nervous System',
+    highlights: [
+      'Persistent memory: durable file store (%APPDATA%) survives NSIS reinstalls',
+      'Agent handshake: sentinel prompt dispatched + verified on every handshake, not just detected',
+      'Name correction: fully name-agnostic (no hardcoded names); history-aware model resolves ambiguous corrections',
+      'Local STT: faster-whisper 1.2.1 installed; AURA tries local transcription first, falls back to API',
+      'Ollama service + model router: local reflex tier (Phi-3.5-mini) for intent/cleanup/correction',
+      'LiveCanvas: real <canvas> Layer 2 — audio-reactive particles (listening/speaking), orbital ring (thinking), diagram templates',
+      'Silent upgrade: UpgradeService snapshots memory before install, restores + verifies after; startup system check on version change',
+    ],
+  },
+  {
+    version:  '0.5.1',
+    phase:    'Phase 3J QA',
+    date:     '2026-05-31',
+    summary:  'Visual + Voice Fix',
+    highlights: [
+      'Unique 0.5.1 installer + in-app build marker (version, phase, commit, build time) so the running build is identifiable',
+      'Living Visual Canvas is now a premium, state-reactive work surface (idle / listening / thinking / tool / memory / done)',
+      'Voice name + spelling capture: letter-by-letter and NATO spelling normalized; confirms before saving an uncertain name',
+      'Transcription biased with project vocabulary (AURA, Karim, Claude, Codex, Tauri...) and a local correction dictionary',
+      'Voice diagnostics in Details: raw vs cleaned text, detected intent, spelling mode, saved value, and timings',
+    ],
+  },
+  {
+    version:  '0.5.0',
+    phase:    'Phase 3J',
+    date:     '2026-05-31',
+    summary:  'Operator UI/UX Refinement',
+    highlights: [
+      'Console uses one shared operator right panel instead of duplicate sidebars',
+      'Operator panel tabs expose Activity, Tasks, Terminal, Logs, Memory, Capabilities, Recipes, Notifications, and Details',
+      'Voice Core center is cleaner and keeps detailed status in the right panel',
+      'RuntimeTask drawer, history, and canvas are more compact and task-driven',
+      'Active UI labels updated away from stale mock and old-phase copy',
+    ],
+  },
+  {
     version:  '0.5.0',
     phase:    'Phase 3H',
     date:     '2026-05-31',
@@ -37,7 +130,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     highlights: [
       'Capability registry: can/whyNot/test/recommendUpgrade with evidence',
       'Structured user profile + session-thread continuity + compaction',
-      'Live console dispatch — AURA can be tested through its own console',
+      'Live console dispatch - AURA can be tested through its own console',
       'memory.* and capabilities.* tools the model can call',
       'Agent bridges (Claude/Codex/Antigravity) with connection state',
       'Internal self-test harness, capability gap planner',
@@ -67,7 +160,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     summary:  'Voice Conversation MVP',
     highlights: [
       'Real microphone recording via push-to-talk (15s max)',
-      'OpenAI Whisper STT → gpt-4o-mini Chat → OpenAI TTS — all via Tauri backend',
+      'OpenAI Whisper STT -> gpt-4o-mini Chat -> OpenAI TTS - all via Tauri backend',
       'API key held in Rust; never exposed to frontend',
       'Conversation panel with history, visualizer states per turn',
       'Voice On/Off toggle in Voice Core',
@@ -80,8 +173,8 @@ export const CHANGELOG: ChangelogEntry[] = [
     date:     '2026-05-29',
     summary:  'Self-Build Dry Run & Voice Foundation',
     highlights: [
-      'SelfBuildDryRunService — controlled plan + command proposals',
-      'ProviderPlanningService — live Anthropic planning call (max 64 tokens)',
+      'SelfBuildDryRunService - controlled plan + command proposals',
+      'ProviderPlanningService - live Anthropic planning call (max 64 tokens)',
       'Voice session types and VoiceSessionService',
       'OpenAIVoiceSessionService stubs (dry-run capable)',
       'VoiceTranscriptService with 7 event types',
@@ -104,7 +197,7 @@ export const CHANGELOG: ChangelogEntry[] = [
   },
   {
     version:  '0.2.0',
-    phase:    'Phase 2 (A–G)',
+    phase:    'Phase 2 (A-G)',
     date:     '2026-05-27',
     summary:  'Foundation & Desktop Architecture',
     highlights: [

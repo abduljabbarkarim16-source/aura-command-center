@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { CommandPalette } from './operator/CommandPalette';
@@ -8,6 +8,8 @@ import { RuntimeTaskDrawer } from './operator/RuntimeTaskDrawer';
 
 export function Layout() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
+  const location = useLocation();
+  const pageOwnsRightPanel = location.pathname === '/';
 
   return (
     <div className="flex h-screen bg-zinc-950 text-zinc-100 font-sans overflow-hidden selection:bg-indigo-500/30">
@@ -24,10 +26,12 @@ export function Layout() {
           <main className="flex-1 overflow-y-auto min-h-0 relative">
             <Outlet />
           </main>
-          {/* Right operator panel — collapsible, wired to notification/transcript services */}
-          <div className="relative hidden shrink-0 xl:flex">
-            <OperatorRightPanel width={260} defaultOpen={true} />
-          </div>
+          {/* Right operator panel - collapsible, wired to notification/transcript services */}
+          {!pageOwnsRightPanel && (
+            <div className="relative hidden shrink-0 xl:flex">
+              <OperatorRightPanel width={320} defaultOpen={true} />
+            </div>
+          )}
         </div>
       </div>
       

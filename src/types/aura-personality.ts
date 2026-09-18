@@ -42,5 +42,5 @@ export const DEFAULT_PERSONALITY: PersonalityConfig = {
   auraName:        'AURA',
   injectPersonal:  true,
   injectTask:      true,
-  maxMemoryInject: 8,
+  maxMemoryInject: 20, // Phase 3K+ audit: 8 was overriding AuraMemoryService MAX_INJECT=20
 };
