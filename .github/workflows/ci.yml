@@ -1,0 +1,62 @@
+name: CI
+
+# Mirrors the local validation gate used before merging to main:
+#   npm ci  ->  npm run lint  ->  npm run build  ->  cargo test
+#
+# Deliberately NOT in this workflow:
+#   - npm run tauri:build / installer bundling or signing (slow; needs signing material)
+#   - any credential-dependent runtime test (voice, chat, TTS, tool dispatch)
+#   - any provider API key. No secrets are read by this workflow.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Read-only. This workflow only needs to check out the repo and run checks.
+permissions:
+  contents: read
+
+# A newer push to the same ref supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Lint, build, and Rust tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Type check (npm run lint)
+        run: npm run lint
+
+      - name: Build frontend (npm run build)
+        run: npm run build
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Rust tests (cargo test)
+        run: cargo test --manifest-path src-tauri/Cargo.toml
