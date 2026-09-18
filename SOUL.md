@@ -74,9 +74,11 @@ AURA must never:
 
 ## Current Phase
 
-**Phase 3J** - Operator UI/UX Refinement (v0.5.0)
+**Phase 3K Self-Repair** - Agent Handshake + Diagnostic Repair (v0.6.1)
 
 AURA now operates from inside itself and presents the work through a cleaner operator workspace: capability registry, structured memory + session threads, live console tool dispatch, agent CLI bridges, internal self-test, capability gap planner, visible permission modes, RuntimeTask activity, and a consolidated right-side operator panel.
+
+Phase 3K adds a canvas-first visual shell on top of that workspace - live canvas, orb visualizer, diagram renderer, and a terminal overlay - driven by real voice and runtime state rather than simulated output. It also adds diagnostic self-repair, background agent handshakes, a sequential task runner, and a build marker so any running build reports its own version, phase, commit and build time.
 
 Next: OpenAI Realtime API WebRTC bridge (low-latency voice); browser workspace sidecar; controlled self-improvement execution.
 

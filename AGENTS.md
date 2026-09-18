@@ -1,8 +1,8 @@
 # AGENTS.md - AURA Agent Collaboration Rules
 
 **Project:** AURA Command Center
-**Version:** Phase 3J - Operator UI/UX Refinement (v0.5.0)
-**Last updated:** 2026-05-31
+**Version:** Phase 3K Self-Repair - Agent Handshake + Diagnostic Repair (v0.6.1)
+**Last updated:** 2026-09-18
 
 ---
 
