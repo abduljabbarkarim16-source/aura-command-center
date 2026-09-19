@@ -494,8 +494,11 @@ class ToolRegistryServiceImpl {
       const result = await this.runTool(tool, inputs);
       const durationMs = Date.now() - start;
       
-      const successMessage = `Completed with exit code ${result.exitCode}. Output: ${result.output.slice(0, 100)}...`;
-      runtimeTaskService.appendLog(runtimeTask.id, successMessage, result.exitCode === 0 ? 'success' : 'warn');
+      const ok = result.exitCode === 0;
+      const outcomeMessage = ok
+        ? `Completed with exit code ${result.exitCode}. Output: ${result.output.slice(0, 100)}...`
+        : `FAILED with exit code ${result.exitCode}. Output: ${result.output.slice(0, 100)}...`;
+      runtimeTaskService.appendLog(runtimeTask.id, outcomeMessage, ok ? 'success' : 'warn');
 
       const done: Partial<ToolExecution> = {
         status: result.exitCode === 0 ? 'completed' : 'error',
@@ -527,12 +530,26 @@ class ToolRegistryServiceImpl {
         }
       }
       
+      // DEFECT-2 fix: a non-zero exit is a FAILURE and must not be normalized as a
+      // success. The model reads ToolResult.status; returning 'success' for a failed
+      // tool invites exactly the hallucinated-success incident this service defines.
+      if (!ok) {
+        return ToolResultNormalizer.normalizeError(
+          toolId,
+          runtimeTask.id,
+          startIso,
+          durationMs,
+          `Tool exited with code ${result.exitCode}: ${result.output.slice(0, 200)}`,
+          { stdout: result.output, exitCode: result.exitCode }
+        );
+      }
+
       return ToolResultNormalizer.normalizeSuccess(
-        toolId, 
-        runtimeTask.id, 
-        startIso, 
-        durationMs, 
-        result.exitCode === 0 ? 'Tool completed successfully.' : 'Tool finished with non-zero exit code.', 
+        toolId,
+        runtimeTask.id,
+        startIso,
+        durationMs,
+        'Tool completed successfully.',
         { stdout: result.output, exitCode: result.exitCode }
       );
     } catch (err) {

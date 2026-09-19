@@ -4,13 +4,54 @@ mod config_commands;
 mod persist_commands;
 mod voice_commands;
 
-// Walk up the directory tree from `start`, trying to load a `.env` file.
-// Returns true if a `.env` was successfully loaded.
+/// Environment variable names that can supply the OpenAI key, in priority order.
+const OPENAI_KEY_VARS: [&str; 2] = ["VITE_OPENAI_API_KEY", "OPENAI_API_KEY"];
+
+/// True only when a *usable* OpenAI key is present in the process environment.
+///
+/// An empty or whitespace-only value counts as absent. A blank `.env` template
+/// must never be treated as "the key is configured".
+fn openai_key_present() -> bool {
+    OPENAI_KEY_VARS
+        .iter()
+        .any(|k| std::env::var(k).map(|v| !v.trim().is_empty()).unwrap_or(false))
+}
+
+/// Remove blank key variables so a later source can still supply a real value.
+///
+/// `dotenvy::from_path` does not override variables that are already set. Without
+/// this, a `.env` containing `VITE_OPENAI_API_KEY=` (no value) would set the var to
+/// an empty string and permanently shadow the real key in `%APPDATA%`.
+fn clear_blank_openai_keys() {
+    for k in OPENAI_KEY_VARS {
+        if let Ok(v) = std::env::var(k) {
+            if v.trim().is_empty() {
+                std::env::remove_var(k);
+            }
+        }
+    }
+}
+
+/// Load `path` as a dotenv file and report whether it yielded a usable key.
+fn load_env_file(path: &std::path::Path) -> bool {
+    if dotenvy::from_path(path).is_err() {
+        return false;
+    }
+    clear_blank_openai_keys();
+    openai_key_present()
+}
+
+// Walk up the directory tree from `start`, loading any `.env` found.
+//
+// DEFECT-1: this previously returned as soon as a `.env` file *parsed*, regardless
+// of whether it contained anything. A blank `.env` in the project root therefore
+// satisfied source 1 and stopped the search before `%APPDATA%` was ever consulted,
+// producing a total provider outage while Settings still showed the key as saved.
+// The criterion is now "did we actually obtain a key", not "did a file exist".
 fn try_dotenv_from(start: std::path::PathBuf) -> bool {
     let mut dir = start;
     for _ in 0..8 {
-        let candidate = dir.join(".env");
-        if dotenvy::from_path(&candidate).is_ok() {
+        if load_env_file(&dir.join(".env")) {
             return true;
         }
         match dir.parent() {
@@ -43,7 +84,7 @@ fn load_dotenv() {
         let candidate = std::path::PathBuf::from(&appdata)
             .join("com.aura.commandcenter")
             .join(".env");
-        if dotenvy::from_path(&candidate).is_ok() {
+        if load_env_file(&candidate) {
             return;
         }
     }
@@ -58,10 +99,104 @@ fn load_dotenv() {
         ];
         for rel in &roots {
             let candidate = std::path::PathBuf::from(&home).join(rel).join(".env");
-            if dotenvy::from_path(&candidate).is_ok() {
+            if load_env_file(&candidate) {
                 return;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// Serialises the tests in this module: they mutate process-global env vars.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn reset_keys() {
+        for k in OPENAI_KEY_VARS {
+            std::env::remove_var(k);
+        }
+    }
+
+    fn write_env(dir: &std::path::Path, body: &str) -> std::path::PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let p = dir.join(".env");
+        let mut f = std::fs::File::create(&p).unwrap();
+        f.write_all(body.as_bytes()).unwrap();
+        p
+    }
+
+    #[test]
+    fn blank_value_is_not_a_present_key() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_keys();
+        assert!(!openai_key_present(), "no vars set must mean absent");
+        std::env::set_var("VITE_OPENAI_API_KEY", "");
+        assert!(!openai_key_present(), "empty value must count as absent");
+        std::env::set_var("VITE_OPENAI_API_KEY", "   ");
+        assert!(!openai_key_present(), "whitespace-only must count as absent");
+        std::env::set_var("VITE_OPENAI_API_KEY", "sk-test-value");
+        assert!(openai_key_present(), "real value must count as present");
+        reset_keys();
+    }
+
+    #[test]
+    fn fallback_var_is_honoured() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_keys();
+        std::env::set_var("OPENAI_API_KEY", "sk-fallback");
+        assert!(openai_key_present(), "OPENAI_API_KEY alone must satisfy");
+        reset_keys();
+    }
+
+    #[test]
+    fn clear_blank_removes_only_empty_values() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_keys();
+        std::env::set_var("VITE_OPENAI_API_KEY", "");
+        std::env::set_var("OPENAI_API_KEY", "sk-real");
+        clear_blank_openai_keys();
+        assert!(std::env::var("VITE_OPENAI_API_KEY").is_err(), "blank var must be removed");
+        assert_eq!(std::env::var("OPENAI_API_KEY").unwrap(), "sk-real", "real var must survive");
+        reset_keys();
+    }
+
+    /// DEFECT-1 regression: a blank project `.env` must not shadow a real key
+    /// in a later source. Before the fix, loading the blank file returned true
+    /// and the second source was never consulted.
+    #[test]
+    fn blank_env_file_does_not_shadow_a_real_key() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_keys();
+
+        let base = std::env::temp_dir().join(format!("aura-defect1-{}", std::process::id()));
+        let blank_dir = base.join("project");
+        let real_dir = base.join("appdata");
+        let blank = write_env(&blank_dir, "# template\nVITE_OPENAI_API_KEY=\nOPENAI_API_KEY=\n");
+        let real = write_env(&real_dir, "VITE_OPENAI_API_KEY=sk-the-real-key\n");
+
+        // Source 1: the blank file parses, but yields no usable key.
+        assert!(!load_env_file(&blank), "blank .env must NOT report success");
+        assert!(!openai_key_present(), "blank .env must leave the key absent");
+
+        // Source 2: the real file must still be able to supply the key.
+        assert!(load_env_file(&real), "real .env must report success");
+        assert!(openai_key_present(), "real key must be loaded after a blank file");
+        assert_eq!(std::env::var("VITE_OPENAI_API_KEY").unwrap(), "sk-the-real-key");
+
+        reset_keys();
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn missing_file_is_not_success() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset_keys();
+        let nowhere = std::env::temp_dir().join("aura-does-not-exist-xyz").join(".env");
+        assert!(!load_env_file(&nowhere), "absent file must not report success");
+        reset_keys();
     }
 }
 
