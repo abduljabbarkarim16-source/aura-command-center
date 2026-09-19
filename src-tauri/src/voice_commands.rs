@@ -27,6 +27,39 @@ const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024; // 25 MB — Whisper API actual
 /// is at least ~3 KB. Anything smaller is silence, a recording glitch, or an empty
 /// MediaRecorder frame — do not waste an API call on it.
 const MIN_AUDIO_BYTES: usize = 3_000;
+
+/// Map an audio MIME type to the file extension used for the Whisper upload.
+///
+/// The OpenAI transcription endpoint infers the container format from the
+/// uploaded file name, so a wrong extension is rejected as
+/// "Audio file might be corrupted or unsupported" even when the bytes are valid.
+///
+/// DEFECT-3: `audio/mpeg` (and `audio/mp3`) previously fell through to the
+/// `webm` default, so MP3 bytes were uploaded as `audio.webm` and rejected.
+/// That blocked any TTS-to-STT round trip, since AURA's own TTS returns MP3.
+///
+/// Order matters:
+///   - `mp4`/`m4a` before `mpeg`/`mp3`, so `audio/mp4` is not read as MPEG audio.
+///   - `webm` before `opus`, because MediaRecorder on Windows emits
+///     `audio/webm; codecs=opus`. Matching `opus` first would misroute the live
+///     recording path to `.ogg` and break ordinary voice capture.
+fn audio_ext_for_mime(mime: &str) -> &'static str {
+    let m = mime.to_ascii_lowercase();
+    if m.contains("mp4") || m.contains("m4a") {
+        "m4a"
+    } else if m.contains("mpeg") || m.contains("mp3") {
+        "mp3"
+    } else if m.contains("webm") {
+        "webm"
+    } else if m.contains("ogg") || m.contains("opus") {
+        "ogg"
+    } else if m.contains("wav") {
+        "wav"
+    } else {
+        "webm"
+    }
+}
+
 const MAX_TEXT_LEN: usize = 4096;
 const MAX_SYSTEM_PROMPT_LEN: usize = 8_000;
 const MAX_RESPONSE_TOKENS: u32 = 1_000; // Phase 3K audit: raised from 300 — stop cutting off answers
@@ -239,15 +272,7 @@ pub async fn openai_transcribe_audio(
     } else {
         content_type
     };
-    let ext = if mime.contains("mp4") || mime.contains("m4a") {
-        "m4a"
-    } else if mime.contains("ogg") {
-        "ogg"
-    } else if mime.contains("wav") {
-        "wav"
-    } else {
-        "webm"
-    };
+    let ext = audio_ext_for_mime(&mime);
 
     let file_part = reqwest::multipart::Part::bytes(audio_bytes)
         .file_name(format!("audio.{ext}"))
@@ -878,5 +903,54 @@ pub fn local_transcribe_audio(
             Err(format!("Local STT failed: {err}"))
         }
         Err(e) => Err(format!("Local STT spawn error: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::audio_ext_for_mime;
+
+    /// DEFECT-3 regression: `audio/mpeg` must map to `mp3`, not fall through to
+    /// the `webm` default. Uploading MP3 bytes as `audio.webm` makes the OpenAI
+    /// transcription endpoint reject them as corrupted/unsupported, which broke
+    /// any TTS-to-STT round trip because AURA's own TTS returns MP3.
+    #[test]
+    fn mpeg_and_mp3_map_to_mp3() {
+        assert_eq!(audio_ext_for_mime("audio/mpeg"), "mp3");
+        assert_eq!(audio_ext_for_mime("audio/mp3"), "mp3");
+        assert_eq!(audio_ext_for_mime("AUDIO/MPEG"), "mp3", "match must be case-insensitive");
+    }
+
+    /// mp4/m4a must win over the mpeg branch so `audio/mp4` is not read as MPEG.
+    #[test]
+    fn mp4_and_m4a_take_priority_over_mpeg() {
+        assert_eq!(audio_ext_for_mime("audio/mp4"), "m4a");
+        assert_eq!(audio_ext_for_mime("audio/m4a"), "m4a");
+        assert_eq!(audio_ext_for_mime("audio/x-m4a"), "m4a");
+    }
+
+    /// Regression guard for the live recording path: MediaRecorder on Windows
+    /// emits `audio/webm; codecs=opus`. An earlier draft of this map matched
+    /// `opus` before `webm` and misrouted it to `.ogg`, which would have broken
+    /// ordinary voice capture. Caught by this suite before it shipped.
+    #[test]
+    fn webm_with_opus_codec_stays_webm() {
+        assert_eq!(audio_ext_for_mime("audio/webm; codecs=opus"), "webm");
+        assert_eq!(audio_ext_for_mime("audio/webm;codecs=opus"), "webm");
+        assert_eq!(audio_ext_for_mime("audio/ogg; codecs=opus"), "ogg");
+    }
+
+    #[test]
+    fn previously_supported_types_are_unchanged() {
+        assert_eq!(audio_ext_for_mime("audio/ogg"), "ogg");
+        assert_eq!(audio_ext_for_mime("audio/wav"), "wav");
+        assert_eq!(audio_ext_for_mime("audio/x-wav"), "wav");
+        assert_eq!(audio_ext_for_mime("audio/webm"), "webm");
+    }
+
+    #[test]
+    fn unknown_types_default_to_webm() {
+        assert_eq!(audio_ext_for_mime(""), "webm");
+        assert_eq!(audio_ext_for_mime("application/octet-stream"), "webm");
     }
 }
