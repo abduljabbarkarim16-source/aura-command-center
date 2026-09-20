@@ -13,6 +13,7 @@
 
 import { useState, useRef, useCallback } from 'react';
 import type { VoiceRecordingState } from '../types/voice-session';
+import { micDeviceService } from '../services/voice/MicDeviceService';
 
 export interface UseVoiceRecorderReturn {
   state: VoiceRecordingState;
@@ -74,7 +75,8 @@ export function useVoiceRecorder(maxDurationMs = 15_000): UseVoiceRecorderReturn
 
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      // ERR-0074: honour the user's selected input device instead of the OS default.
+      stream = await micDeviceService.getStream();
     } catch (err) {
       const isDenied = err instanceof DOMException && (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError');
       setState(s => ({

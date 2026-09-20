@@ -20,6 +20,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useSegmentedVoiceSession } from './useSegmentedVoiceSession';
 import { openAIVoiceSessionService } from '../services/voice/OpenAIVoiceSessionService';
 import { voiceTranscriptLogService } from '../services/voice/VoiceTranscriptLogService';
+import { micDeviceService } from '../services/voice/MicDeviceService';
 import { voiceLatencyService } from '../services/voice/VoiceLatencyService';
 import { auraMemoryService } from '../services/memory/AuraMemoryService';
 import { auraPersonalityService } from '../services/personality/AuraPersonalityService';
@@ -191,10 +192,10 @@ export function useConversationLoop(config: ConversationLoopConfig) {
   const startBargeInAnalyser = useCallback(async () => {
     if (!voiceSettings.interruptEnabled) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-        video: false,
-      });
+      // ERR-0074: route through micDeviceService so the user's selected input is
+      // honoured. Bare `audio: true` bound to the OS default, which on machines with
+      // relay/virtual mics can be a device that opens fine and returns pure silence.
+      const stream = await micDeviceService.getStream();
       const ctx = new AudioContext();
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
