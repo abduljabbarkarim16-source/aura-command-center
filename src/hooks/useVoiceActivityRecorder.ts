@@ -22,6 +22,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { MicPermission, VoiceRecordingState } from '../types/voice-session';
+import { micDeviceService } from '../services/voice/MicDeviceService';
 
 // ─── VAD config ───────────────────────────────────────────────────────────────
 
@@ -189,7 +190,8 @@ export function useVoiceActivityRecorder(config: Partial<VADConfig> = {}): UseVo
 
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      // ERR-0074: honour the user's selected input device instead of the OS default.
+      stream = await micDeviceService.getStream();
     } catch (err) {
       const isDenied = err instanceof DOMException &&
         (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError');

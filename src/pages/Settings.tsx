@@ -17,12 +17,14 @@ import {
   CheckCircle2,
   XCircle,
   AlertCircle,
+  AlertTriangle,
   ChevronDown,
   ChevronUp,
   Bell,
   Eye,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useAppSettings } from '../hooks/useAppSettings';
 import { settingsService } from '../services/settings/SettingsService';
 import type { AppSettings, ProviderConfig } from '../types/settings';
@@ -30,6 +32,7 @@ import type { KeyStorageStatus } from '../types/settings';
 import { MakeConnectorCard } from '../components/connectors/MakeConnectorCard';
 import { SecureKeysCard } from '../components/security/SecureKeysCard';
 import { VoiceReadinessCard } from '../components/operator/VoiceReadinessCard';
+import { MicrophoneSelectCard } from '../components/settings/MicrophoneSelectCard';
 import { VERSION_DISPLAY, APP_PHASE_LABEL, BUILD_DATE, CHANGELOG } from '../lib/appVersion';
 
 // ---------------------------------------------------------------------------
@@ -58,12 +61,14 @@ function Toggle({
   checked,
   onChange,
   disabled,
+  notWired,
 }: {
   label: string;
   description?: string;
   checked: boolean;
   onChange: (v: boolean) => void;
   disabled?: boolean;
+  notWired?: boolean;
 }) {
   return (
     <label className={`flex items-start gap-4 cursor-pointer group ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
@@ -80,9 +85,30 @@ function Toggle({
       </div>
       <div>
         <span className="text-sm text-zinc-300 group-hover:text-white transition">{label}</span>
+        <NotWiredBadge show={notWired} />
         {description && <p className="text-xs text-zinc-500 mt-0.5">{description}</p>}
       </div>
     </label>
+  );
+}
+
+/**
+ * Marks a control whose value is persisted but which nothing in the application reads.
+ *
+ * These settings save to localStorage and then have no effect. Rather than remove them
+ * (they document intended behaviour) or leave them silently misleading, they are shown
+ * with this badge so the UI never implies control it does not have. Remove the `notWired`
+ * prop from a control as soon as something actually consumes its value.
+ */
+function NotWiredBadge({ show }: { show?: boolean }) {
+  if (!show) return null;
+  return (
+    <span
+      title="This setting is saved but nothing in AURA reads it yet — changing it has no effect."
+      className="ml-2 align-middle inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-amber-400/90 bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded"
+    >
+      <AlertTriangle className="w-2.5 h-2.5" /> Not connected
+    </span>
   );
 }
 
@@ -91,15 +117,17 @@ function SelectField<T extends string>({
   value,
   options,
   onChange,
+  notWired,
 }: {
   label: string;
   value: T;
   options: { value: T; label: string }[];
   onChange: (v: T) => void;
+  notWired?: boolean;
 }) {
   return (
     <div>
-      <label className="block text-xs font-medium text-zinc-400 mb-1.5">{label}</label>
+      <label className="block text-xs font-medium text-zinc-400 mb-1.5">{label}<NotWiredBadge show={notWired} /></label>
       <select
         value={value}
         onChange={e => onChange(e.target.value as T)}
@@ -119,16 +147,18 @@ function TextField({
   value,
   onChange,
   note,
+  notWired,
 }: {
   label: string;
   placeholder?: string;
   value: string;
   onChange: (v: string) => void;
   note?: string;
+  notWired?: boolean;
 }) {
   return (
     <div>
-      <label className="block text-xs font-medium text-zinc-400 mb-1.5">{label}</label>
+      <label className="block text-xs font-medium text-zinc-400 mb-1.5">{label}<NotWiredBadge show={notWired} /></label>
       <input
         type="text"
         value={value}
@@ -147,16 +177,18 @@ function NumberField({
   min,
   max,
   onChange,
+  notWired,
 }: {
   label: string;
   value: number;
   min?: number;
   max?: number;
   onChange: (v: number) => void;
+  notWired?: boolean;
 }) {
   return (
     <div>
-      <label className="block text-xs font-medium text-zinc-400 mb-1.5">{label}</label>
+      <label className="block text-xs font-medium text-zinc-400 mb-1.5">{label}<NotWiredBadge show={notWired} /></label>
       <input
         type="number"
         value={value}
@@ -234,9 +266,17 @@ function CollapsibleSection({
 function ProviderRow({
   provider,
   onToggle,
+  liveKeyStatus,
 }: {
   provider: ProviderConfig;
   onToggle: (enabled: boolean) => void | Promise<void>;
+  /**
+   * Real, backend-verified key status. `provider.keyStorageStatus` is a hardcoded
+   * constant that nothing ever updates, so it read "Missing" forever regardless of
+   * whether a key was configured — which sent the owner re-entering a key that was
+   * already saved. Prefer the live value whenever we can actually determine it.
+   */
+  liveKeyStatus?: KeyStorageStatus;
 }) {
   return (
     <div className="flex items-center justify-between py-3 border-b border-zinc-800/50 last:border-0">
@@ -248,7 +288,8 @@ function ProviderRow({
         </div>
       </div>
       <div className="flex items-center gap-3">
-        <KeyStatusBadge status={provider.keyStorageStatus} />
+        <KeyStatusBadge status={liveKeyStatus ?? provider.keyStorageStatus} />
+        {!liveKeyStatus && <NotWiredBadge show />}
         <label className="relative flex items-center cursor-pointer">
           <input
             type="checkbox"
@@ -327,6 +368,25 @@ export function Settings() {
 
   const [toast, setToast] = useState<string | null>(null);
 
+  /**
+   * Backend-verified OpenAI key status. The per-provider `keyStorageStatus` field is a
+   * hardcoded constant nothing ever writes, so it always rendered "Missing". Only OpenAI
+   * has a backend check today; the other providers keep the honest "Not connected" marker.
+   */
+  const [openAIKeyLive, setOpenAIKeyLive] = useState<KeyStorageStatus | undefined>();
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = () =>
+      invoke<boolean>('openai_key_is_configured')
+        .then(ok => { if (!cancelled) setOpenAIKeyLive(ok ? 'configured' : 'missing'); })
+        .catch(() => { if (!cancelled) setOpenAIKeyLive(undefined); });
+    void check();
+    // Re-check on focus so saving a key elsewhere in the app is reflected here.
+    window.addEventListener('focus', check);
+    return () => { cancelled = true; window.removeEventListener('focus', check); };
+  }, []);
+
   function showToast(msg: string) {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
@@ -404,17 +464,20 @@ export function Settings() {
             { value: 'system', label: 'System' },
           ]}
           onChange={appTheme => handleUpdate({ appTheme })}
+          notWired
         />
         <Toggle
           label="Enable desktop notifications"
           checked={settings.desktopNotificationsEnabled}
           onChange={desktopNotificationsEnabled => handleUpdate({ desktopNotificationsEnabled })}
+          notWired
         />
         <Toggle
           label="Enable telemetry"
           description="Anonymous usage data. Disabled by default."
           checked={settings.telemetryEnabled}
           onChange={telemetryEnabled => handleUpdate({ telemetryEnabled })}
+          notWired
         />
       </CollapsibleSection>
 
@@ -432,6 +495,7 @@ export function Settings() {
             { value: 'automatic', label: 'Automatic - planned AURA router preview' },
           ]}
           onChange={routingMode => handleUpdate({ routingMode })}
+          notWired
         />
         <TextField
           label="Default Agent ID"
@@ -455,16 +519,21 @@ export function Settings() {
         title="Voice"
         subtitle="Voice input and output settings"
       >
+        {/* Real, wired control: selects the device every voice capture path uses. */}
+        <MicrophoneSelectCard />
+
         <Toggle
           label="Enable voice interface"
           checked={settings.voiceEnabled}
           onChange={voiceEnabled => handleUpdate({ voiceEnabled })}
+          notWired
         />
         <Toggle
           label="Wake word detection"
           description='Listen for "Hey AURA" (requires microphone permission)'
           checked={settings.wakeWordEnabled}
           onChange={wakeWordEnabled => handleUpdate({ wakeWordEnabled })}
+          notWired
           disabled={!settings.voiceEnabled}
         />
         <Toggle
@@ -472,6 +541,7 @@ export function Settings() {
           description="Read assistant replies aloud via local speech synthesis"
           checked={settings.textToSpeechEnabled}
           onChange={textToSpeechEnabled => handleUpdate({ textToSpeechEnabled })}
+          notWired
           disabled={!settings.voiceEnabled}
         />
         <Toggle
@@ -507,6 +577,7 @@ export function Settings() {
           description="Automatically show the artifacts panel when new content is generated"
           checked={settings.artifactAutoOpen}
           onChange={artifactAutoOpen => handleUpdate({ artifactAutoOpen })}
+          notWired
         />
       </CollapsibleSection>
 
@@ -521,12 +592,14 @@ export function Settings() {
           description="rm -rf, drop table, kill, etc."
           checked={settings.requireApprovalForDangerousCommands}
           onChange={v => handleUpdate({ requireApprovalForDangerousCommands: v })}
+          notWired
         />
         <Toggle
           label="Package installation"
           description="npm install, pip install, cargo add, etc."
           checked={settings.requireApprovalForPackageInstall}
           onChange={v => handleUpdate({ requireApprovalForPackageInstall: v })}
+          notWired
         />
         <Toggle
           label="Git push"
@@ -539,6 +612,7 @@ export function Settings() {
           description="Outbound HTTP/HTTPS calls from agent tools"
           checked={settings.requireApprovalForExternalNetwork}
           onChange={v => handleUpdate({ requireApprovalForExternalNetwork: v })}
+          notWired
         />
       </CollapsibleSection>
 
@@ -553,6 +627,7 @@ export function Settings() {
           placeholder="C:\Users\you\dev"
           value={settings.localWorkspaceRoot}
           onChange={v => handleUpdate({ localWorkspaceRoot: v })}
+          notWired
           note="Base directory for new project workspaces. Requires future Tauri FS scope grant."
         />
         <TextField
@@ -560,6 +635,7 @@ export function Settings() {
           placeholder="C:\Users\you\.config\aura\mcp.json"
           value={settings.mcpConfigPath}
           onChange={v => handleUpdate({ mcpConfigPath: v })}
+          notWired
           note="Path to user-managed MCP server config file."
         />
       </CollapsibleSection>
@@ -576,12 +652,22 @@ export function Settings() {
               <ProviderRow
                 provider={p}
                 onToggle={enabled => updateProvider(p.id, { enabled })}
+                liveKeyStatus={p.id === 'provider-openai' ? openAIKeyLive : undefined}
               />
             </Fragment>
           ))}
         </div>
-        <div className="mt-2 p-3 bg-amber-500/5 border border-amber-500/20 rounded-lg text-xs text-amber-400/80">
-          Provider toggles are saved locally. Current desktop API-key storage uses the local AppData .env file, not browser localStorage or OS keychain.
+        <div className="mt-2 p-3 bg-amber-500/5 border border-amber-500/20 rounded-lg text-xs text-amber-400/80 space-y-1.5">
+          <p>
+            <strong>OpenAI</strong> shows a live status read from the Rust backend. Save or
+            remove the key in the <strong>OpenAI API Key</strong> card below — that is the
+            only control that actually stores a key.
+          </p>
+          <p>
+            Rows marked <strong>Not connected</strong> display a fixed placeholder status,
+            not a real check. The enable/disable toggles persist locally but no provider
+            routing reads them yet.
+          </p>
         </div>
       </CollapsibleSection>
 
@@ -602,6 +688,7 @@ export function Settings() {
           min={1}
           max={3650}
           onChange={memoryRetentionDays => handleUpdate({ memoryRetentionDays })}
+          notWired
         />
         <div className="pt-2">
           <button
@@ -647,6 +734,7 @@ export function Settings() {
           description="Show brief notifications in the corner for events and approvals"
           checked={settings.toastNotificationsEnabled}
           onChange={toastNotificationsEnabled => handleUpdate({ toastNotificationsEnabled })}
+          notWired
         />
         <SelectField
           label="Toast position"
@@ -658,18 +746,21 @@ export function Settings() {
             { value: 'top-left',     label: 'Top left'     },
           ]}
           onChange={toastPosition => handleUpdate({ toastPosition })}
+          notWired
         />
         <Toggle
           label="Keep notification history"
           description="Store recent notifications in the bell panel (in-memory, cleared on restart)"
           checked={settings.notificationHistoryEnabled}
           onChange={notificationHistoryEnabled => handleUpdate({ notificationHistoryEnabled })}
+          notWired
         />
         <Toggle
           label="Notification sound"
           description="Play a soft sound for high-priority notifications"
           checked={settings.notificationSoundEnabled}
           onChange={notificationSoundEnabled => handleUpdate({ notificationSoundEnabled })}
+          notWired
           disabled
         />
         <Toggle
@@ -677,6 +768,7 @@ export function Settings() {
           description="Render approval requests directly on Voice Core, not just in notification center"
           checked={settings.showApprovalsAsOverlay}
           onChange={showApprovalsAsOverlay => handleUpdate({ showApprovalsAsOverlay })}
+          notWired
         />
       </CollapsibleSection>
 
