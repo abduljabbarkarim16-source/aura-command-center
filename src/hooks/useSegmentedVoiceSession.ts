@@ -17,7 +17,8 @@
  *   - initChunkRef: stores the very first chunk (WebM EBML header) for partial blob validity
  *   - Segment timer fires every SEGMENT_MS; takes a snapshot of current chunks, resets them
  *   - Each snapshot creates a blob (init + segment chunks) and queues a Whisper call
- *   - Segment results are appended in arrival order to partialTexts[]
+ *   - Each segment reserves a slot index at dispatch and writes its result there, so
+ *     the assembled transcript follows capture order regardless of completion order
  *   - VAD analyser runs in parallel — triggers final segment + session end after silence
  *
  * Security:
@@ -77,6 +78,23 @@ const SPEECH_FRAME_GATE     = 5;
 const RMS_ROLLING_WINDOW    = 8;
 const MIN_SEGMENT_BYTES     = 3_000;
 
+/**
+ * Ceiling for the calibrated noise floor.
+ *
+ * Ordinary speech RMS sits around 0.02–0.15. A room floor above 0.02 is not a room
+ * floor — it means calibration sampled speech. Clamping here keeps VAD insensitive
+ * rather than inert. See DEFECT-V1.
+ */
+const MAX_NOISE_FLOOR = 0.02;
+
+/**
+ * Hard ceiling on how long `stopSession` may wait before returning what it has.
+ *
+ * Generous, because a long final segment legitimately takes several seconds to
+ * transcribe. Its job is to bound a hang, not to race normal operation.
+ */
+const STOP_TIMEOUT_MS = 15_000;
+
 function detectMimeType(): string {
   const types = [
     'audio/webm;codecs=opus',
@@ -133,10 +151,25 @@ export function useSegmentedVoiceSession(config: SegmentedSessionConfig = {}): U
   const chunksRef         = useRef<Blob[]>([]);
   // The very first chunk — contains WebM EBML header; prepended to every partial blob
   const initChunkRef      = useRef<Blob | null>(null);
-  // Collected partial transcripts in order
-  const partialTextsRef   = useRef<string[]>([]);
-  /** Dispatch counter, compared against append order to detect out-of-order assembly. */
+  /**
+   * Segment transcripts indexed by DISPATCH position, not arrival position.
+   *
+   * DEFECT-V2: these were appended with `push` as each transcription resolved. Segments
+   * are dispatched fire-and-forget, so a slow one lands after a later fast one and the
+   * assembled sentence comes out reordered. Writing into a reserved slot keeps capture
+   * order regardless of completion order. Holes are dropped at assembly time.
+   */
+  const partialTextsRef   = useRef<Array<string | undefined>>([]);
+  /** Next dispatch slot. Reserved synchronously so ordering cannot race. */
   const segmentDispatchRef = useRef(0);
+  /**
+   * Transcriptions still in flight. `stopSession` awaits these before assembling.
+   *
+   * Without this, `onstop` awaited only the tail segment, so any periodic segment still
+   * in flight was silently missing from the final transcript — lost speech, not merely
+   * reordered.
+   */
+  const inFlightRef       = useRef<Set<Promise<unknown>>>(new Set());
 
   const mimeTypeRef       = useRef('');
   const startTimeRef      = useRef<number | null>(null);
@@ -202,6 +235,20 @@ export function useSegmentedVoiceSession(config: SegmentedSessionConfig = {}): U
 
   useEffect(() => () => { cleanup(); }, [cleanup]);
 
+  /**
+   * Join stored segments in capture order, skipping slots that produced nothing.
+   *
+   * A hole is normal — a segment can be below the byte floor, gated as silence, or
+   * cleaned to nothing. What matters is that a hole does not shift later segments
+   * forward, which is what `push`-on-arrival used to do.
+   */
+  const assembleTranscript = useCallback((): string => {
+    return partialTextsRef.current
+      .filter((t): t is string => typeof t === 'string' && t.length > 0)
+      .join(' ')
+      .trim();
+  }, []);
+
   // ── Transcribe one segment blob ───────────────────────────────────────────
 
   const transcribeSegment = useCallback(async (segChunks: Blob[], label: string): Promise<string> => {
@@ -213,18 +260,16 @@ export function useSegmentedVoiceSession(config: SegmentedSessionConfig = {}): U
       return '';
     }
 
-    // Segments are dispatched fire-and-forget, so they can finish out of order. Record
-    // the dispatch index and the append index: when they disagree, the assembled
-    // transcript is in completion order rather than capture order, which is the shape
-    // of the reported concatenation fault (DEFECT-V2).
-    const dispatchIndex = segmentDispatchRef.current++;
+    // Reserve this segment's slot synchronously, before any await. Completion order is
+    // then irrelevant: each result lands where it was captured.
+    const slot = segmentDispatchRef.current++;
     const started = performance.now();
 
     const result = await openAIVoiceSessionService.transcribeAudio(blob);
     if (!result.success || !result.text?.trim()) {
       eventLog.info('stt', 'segment.empty', {
         label,
-        dispatchIndex,
+        slot,
         bytes: blob.size,
         ms: Math.round(performance.now() - started),
         skippedReason: result.skippedReason,
@@ -237,30 +282,27 @@ export function useSegmentedVoiceSession(config: SegmentedSessionConfig = {}): U
     const text = cleanupEnabled ? voiceCleanupService.clean(raw) : raw;
 
     if (!text) {
-      eventLog.info('stt', 'segment.cleanedToEmpty', { label, dispatchIndex, raw });
+      eventLog.info('stt', 'segment.cleanedToEmpty', { label, slot, raw });
       return '';
     }
 
-    const appendIndex = partialTextsRef.current.length;
-    partialTextsRef.current.push(text);
-    setLiveTranscript(partialTextsRef.current.join(' '));
+    partialTextsRef.current[slot] = text;
+    setLiveTranscript(assembleTranscript());
     setSegmentsComplete(c => c + 1);
 
-    eventLog.log(appendIndex === dispatchIndex ? 'info' : 'warn', 'stt', 'segment.appended', {
+    eventLog.info('stt', 'segment.stored', {
       label,
-      dispatchIndex,
-      appendIndex,
-      outOfOrder: appendIndex !== dispatchIndex,
+      slot,
       bytes: blob.size,
       ms: Math.round(performance.now() - started),
       raw,
       cleaned: text,
       cleanupChanged: raw !== text,
-      assembled: partialTextsRef.current.join(' '),
+      assembled: assembleTranscript(),
     });
 
     return text;
-  }, [cleanupEnabled]);
+  }, [cleanupEnabled, assembleTranscript]);
 
   // ── Snapshot current segment and send to transcription ───────────────────
 
@@ -268,8 +310,16 @@ export function useSegmentedVoiceSession(config: SegmentedSessionConfig = {}): U
     if (stoppedRef.current) return;
     const seg = chunksRef.current.splice(0);
     if (seg.length === 0) return;
-    // Fire-and-forget: transcription appends to partialTextsRef
-    void transcribeSegment(seg, label);
+    // Dispatched without awaiting so recording is never blocked by transcription, but
+    // tracked so `stopSession` can wait for it. Previously this was untracked, and any
+    // segment still in flight at stop time was silently lost from the final transcript.
+    const p = transcribeSegment(seg, label)
+      .catch(err => {
+        eventLog.error('stt', 'segment.threw', err, { label });
+        return '';
+      })
+      .finally(() => { inFlightRef.current.delete(p); });
+    inFlightRef.current.add(p);
   }, [transcribeSegment]);
 
   // ── Start session ─────────────────────────────────────────────────────────
@@ -303,6 +353,8 @@ export function useSegmentedVoiceSession(config: SegmentedSessionConfig = {}): U
     chunksRef.current        = [];
     initChunkRef.current     = null;
     partialTextsRef.current  = [];
+    segmentDispatchRef.current = 0;
+    inFlightRef.current.clear();
     speechDetectedRef.current    = false;
     autoStopFiredRef.current     = false;
     silenceStartRef.current      = null;
@@ -407,7 +459,31 @@ export function useSegmentedVoiceSession(config: SegmentedSessionConfig = {}): U
         if (calSamples.length > 0 && noiseFloorRef.current === BASE_SPEECH_THRESHOLD) {
           const sorted = [...calSamples].sort((a, b) => a - b);
           const p75    = sorted[Math.floor(sorted.length * 0.75)];
-          noiseFloorRef.current = Math.max(BASE_SPEECH_THRESHOLD, p75 * 1.5);
+          // Clamp the calibrated floor.
+          //
+          // DEFECT-V1: calibration assumes the first 500 ms is silence. People click and
+          // start talking, so it frequently samples speech instead. The floor is then set
+          // from speech energy, the speech threshold becomes floor*2 — above anything the
+          // user can produce — `speechDetectedRef` never flips, and the silence branch
+          // that triggers auto-stop is unreachable. The session then runs to its 90s cap
+          // or until stopped by hand, presenting as a turn stuck in LISTENING.
+          //
+          // The ceiling means a calibration polluted by speech degrades to a slightly
+          // insensitive VAD rather than a disabled one.
+          const raw = Math.max(BASE_SPEECH_THRESHOLD, p75 * 1.5);
+          noiseFloorRef.current = Math.min(raw, MAX_NOISE_FLOOR);
+          if (raw > MAX_NOISE_FLOOR) {
+            eventLog.warn('mic', 'vad.calibrationClamped', {
+              measured: Number(raw.toFixed(5)),
+              clampedTo: MAX_NOISE_FLOOR,
+              likelyCause: 'speech during the calibration window',
+            });
+          }
+          eventLog.info('mic', 'vad.calibrated', {
+            noiseFloor: Number(noiseFloorRef.current.toFixed(5)),
+            speechThreshold: Number(Math.max(BASE_SPEECH_THRESHOLD, noiseFloorRef.current * 2).toFixed(5)),
+            samples: calSamples.length,
+          });
           setVadPhase('recording');
         }
 
@@ -448,27 +524,64 @@ export function useSegmentedVoiceSession(config: SegmentedSessionConfig = {}): U
     return new Promise((resolve) => {
       if (!sessionActiveRef.current) { resolve(null); return; }
 
-      stopResolveRef.current = resolve;
-
-      const recorder = recorderRef.current;
-      if (!recorder || recorder.state === 'inactive') {
-        const text = partialTextsRef.current.join(' ').trim() || null;
+      // Resolve exactly once, from whichever path gets there first.
+      //
+      // DEFECT-V1: this promise previously had a single resolution path —
+      // `recorder.onstop`. If the recorder never fired onstop, or the tail
+      // transcription hung on a slow API call, the promise never settled and the UI sat
+      // in its current phase indefinitely (observed: 31.2s in LISTENING). A voice turn
+      // must always end, even badly.
+      let settled = false;
+      const settle = (text: string | null, how: string) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(guard);
+        eventLog.info('state', 'session.stopped', {
+          how,
+          chars: text?.length ?? 0,
+          segments: partialTextsRef.current.length,
+          stored: partialTextsRef.current.filter(Boolean).length,
+        });
         cleanup();
         resolve(text);
         stopResolveRef.current = null;
+      };
+
+      const guard = setTimeout(() => {
+        // Hand back whatever did arrive rather than nothing: a partial transcript is
+        // more use than a hung turn.
+        eventLog.warn('state', 'session.stopTimeout', {
+          afterMs: STOP_TIMEOUT_MS,
+          inFlight: inFlightRef.current.size,
+        });
+        settle(assembleTranscript() || null, 'timeout');
+      }, STOP_TIMEOUT_MS);
+
+      // Expose `settle`, not the bare `resolve`. Other paths — recorder.onerror,
+      // cancelSession — resolve through this ref; routing them through settle means they
+      // also clear the guard timer instead of leaving it armed to fire a spurious
+      // timeout afterwards.
+      stopResolveRef.current = (text) => settle(text, 'external');
+
+      const recorder = recorderRef.current;
+      if (!recorder || recorder.state === 'inactive') {
+        settle(assembleTranscript() || null, 'recorder-already-inactive');
         return;
       }
 
       recorder.onstop = async () => {
         // Transcribe remaining chunks (the tail segment)
         const tail = chunksRef.current.splice(0);
+        const pending: Array<Promise<unknown>> = [...inFlightRef.current];
         if (tail.length > 0) {
-          await transcribeSegment(tail, 'tail');
+          pending.push(transcribeSegment(tail, 'tail').catch(err => {
+            eventLog.error('stt', 'segment.threw', err, { label: 'tail' });
+          }));
         }
-        const fullText = partialTextsRef.current.join(' ').trim() || null;
-        cleanup();
-        resolve(fullText);
-        stopResolveRef.current = null;
+        // Wait for every dispatched segment, not just the tail. allSettled so one
+        // failed segment cannot strand the rest.
+        await Promise.allSettled(pending);
+        settle(assembleTranscript() || null, 'clean');
       };
 
       // Stop the periodic segment timer so it doesn't race with the tail transcription
@@ -476,7 +589,7 @@ export function useSegmentedVoiceSession(config: SegmentedSessionConfig = {}): U
 
       recorder.stop();
     });
-  }, [cleanup, transcribeSegment]);
+  }, [cleanup, transcribeSegment, assembleTranscript]);
 
   // ── Cancel session ────────────────────────────────────────────────────────
 
