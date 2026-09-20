@@ -65,8 +65,15 @@ class EventLogServiceImpl {
   /**
    * Open a new turn. Every event logged until `endTurn` carries this id, which is what
    * makes a single voice exchange readable end to end.
+   *
+   * A still-open turn is closed automatically as `superseded`. The voice pipeline has
+   * roughly a dozen exit paths, several of them in audio callbacks, so requiring every
+   * one to call `endTurn` would guarantee leaks. Self-closing here means a missed call
+   * costs one imprecise outcome label rather than silently attributing the next turn's
+   * events to the previous turn.
    */
   beginTurn(kind = 'voice'): string {
+    if (this.turnId) this.endTurn('superseded');
     this.turnId = shortId('turn');
     this.log('info', 'state', 'turn.begin', { kind });
     return this.turnId;

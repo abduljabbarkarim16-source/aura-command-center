@@ -30,6 +30,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { openAIVoiceSessionService } from '../services/voice/OpenAIVoiceSessionService';
 import { voiceCleanupService } from '../services/voice/VoiceCleanupService';
 import { micDeviceService } from '../services/voice/MicDeviceService';
+import { eventLog } from '../services/logging/EventLogService';
 import type { MicPermission } from '../types/voice-session';
 import type { VADPhase } from './useVoiceActivityRecorder';
 
@@ -134,6 +135,8 @@ export function useSegmentedVoiceSession(config: SegmentedSessionConfig = {}): U
   const initChunkRef      = useRef<Blob | null>(null);
   // Collected partial transcripts in order
   const partialTextsRef   = useRef<string[]>([]);
+  /** Dispatch counter, compared against append order to detect out-of-order assembly. */
+  const segmentDispatchRef = useRef(0);
 
   const mimeTypeRef       = useRef('');
   const startTimeRef      = useRef<number | null>(null);
@@ -205,22 +208,57 @@ export function useSegmentedVoiceSession(config: SegmentedSessionConfig = {}): U
     const init = initChunkRef.current;
     const blobChunks = init ? [init, ...segChunks] : segChunks;
     const blob = new Blob(blobChunks, { type: mimeTypeRef.current || 'audio/webm' });
-    if (blob.size < MIN_SEGMENT_BYTES) return '';
+    if (blob.size < MIN_SEGMENT_BYTES) {
+      eventLog.log('debug', 'stt', 'segment.tooSmall', { label, bytes: blob.size, floor: MIN_SEGMENT_BYTES });
+      return '';
+    }
+
+    // Segments are dispatched fire-and-forget, so they can finish out of order. Record
+    // the dispatch index and the append index: when they disagree, the assembled
+    // transcript is in completion order rather than capture order, which is the shape
+    // of the reported concatenation fault (DEFECT-V2).
+    const dispatchIndex = segmentDispatchRef.current++;
+    const started = performance.now();
 
     const result = await openAIVoiceSessionService.transcribeAudio(blob);
-    if (!result.success || !result.text?.trim()) return '';
+    if (!result.success || !result.text?.trim()) {
+      eventLog.info('stt', 'segment.empty', {
+        label,
+        dispatchIndex,
+        bytes: blob.size,
+        ms: Math.round(performance.now() - started),
+        skippedReason: result.skippedReason,
+        error: result.error,
+      });
+      return '';
+    }
 
-    const text = cleanupEnabled
-      ? voiceCleanupService.clean(result.text.trim())
-      : result.text.trim();
+    const raw = result.text.trim();
+    const text = cleanupEnabled ? voiceCleanupService.clean(raw) : raw;
 
-    if (!text) return '';
+    if (!text) {
+      eventLog.info('stt', 'segment.cleanedToEmpty', { label, dispatchIndex, raw });
+      return '';
+    }
 
+    const appendIndex = partialTextsRef.current.length;
     partialTextsRef.current.push(text);
     setLiveTranscript(partialTextsRef.current.join(' '));
     setSegmentsComplete(c => c + 1);
 
-    void label; // used for debugging, omit in prod
+    eventLog.log(appendIndex === dispatchIndex ? 'info' : 'warn', 'stt', 'segment.appended', {
+      label,
+      dispatchIndex,
+      appendIndex,
+      outOfOrder: appendIndex !== dispatchIndex,
+      bytes: blob.size,
+      ms: Math.round(performance.now() - started),
+      raw,
+      cleaned: text,
+      cleanupChanged: raw !== text,
+      assembled: partialTextsRef.current.join(' '),
+    });
+
     return text;
   }, [cleanupEnabled]);
 

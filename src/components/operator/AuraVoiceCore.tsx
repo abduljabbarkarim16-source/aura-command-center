@@ -24,6 +24,7 @@ import {
   AlertTriangle, Moon, Pin, Zap,
 } from 'lucide-react';
 import { auraMemoryService } from '../../services/memory/AuraMemoryService';
+import { eventLog } from '../../services/logging/EventLogService';
 import { auraPersonalityService } from '../../services/personality/AuraPersonalityService';
 import { cn } from '../../lib/utils';
 import type { VisualizerState } from './AuraVoiceVisualizer';
@@ -317,6 +318,12 @@ export function AuraVoiceCore({
   // -- One-shot processing pipeline -------------------------------------------
   const processOneShotBlob = useCallback(async (blob: Blob, durationMs: number) => {
     runningRef.current = true;
+    eventLog.beginTurn('voice-one-shot');
+    eventLog.info('mic', 'capture.complete', {
+      bytes: blob.size,
+      durationMs,
+      mimeType: blob.type || 'unknown',
+    });
     setOneShotPhase('transcribing');
     setLiveTranscriptOS({ user: '...', aura: '' });
 
@@ -377,6 +384,7 @@ export function AuraVoiceCore({
     const audio = new Audio(ttsResult.audioBlobUrl);
     audioRef.current = audio;
     audio.onended = () => {
+      eventLog.endTurn('spoken');
       setOneShotPhase('idle'); URL.revokeObjectURL(ttsResult.audioBlobUrl!);
       setCurrentAudioUrl(null); runningRef.current = false;
     };
