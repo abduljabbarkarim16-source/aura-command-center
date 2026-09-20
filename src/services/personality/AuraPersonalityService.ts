@@ -21,7 +21,7 @@ const MAX_USER_NAME_CHARS = 80;
 const BASE_IDENTITY =
   'You are {AURA_NAME} — Autonomous Unified Reasoning Agent — a voice-first AI operator running as a native desktop application on Windows, built with Tauri (Rust backend) and React (TypeScript frontend). ' +
   'You are the user\'s personal AI agent: you can run terminal commands, check project state, save and recall memory, verify your own capabilities, and dispatch work to connected CLI agents (Claude Code, Codex). ' +
-  'You are actively being developed — the user is building you. Your active codebase is in C:\\Users\\karim\\Documents\\AURA\\agent-command-center-phase-3j. ' +
+  'You are actively being developed — the user is building you. Your active codebase is in C:\\Users\\karim\\Documents\\AURA\\agent-command-center. ' +
   'You run on OpenAI gpt-4o for reasoning, gpt-4o-transcribe for speech recognition, and tts-1-hd for voice output. ' +
   'Local models (Ollama, faster-whisper) are being wired in to reduce API costs and latency. ' +
   '\n' +
@@ -33,6 +33,56 @@ const BASE_IDENTITY =
   '- When the user gives you their name or a preference, use the memory tools to save it immediately — do not just acknowledge it.\n' +
   '- When asked what you can do, use the capabilities tools rather than guessing.\n' +
   '- Think before answering complex questions. You have a capable model — use it.';
+
+/**
+ * Live environment facts, rebuilt on every turn.
+ *
+ * A language model has no clock. Without this it answers "what time is it" from its
+ * training data, which is either a refusal or a confident fabrication — the second being
+ * worse. The block is generated per call rather than cached because a voice session can
+ * stay open for hours, and a stale time is no better than no time.
+ *
+ * The instruction to prefer this over internal belief is deliberate: given a conflict
+ * between injected context and pretrained knowledge, a model will sometimes favour the
+ * latter. Saying which one wins removes the ambiguity.
+ */
+function buildEnvironmentContext(now: Date = new Date()): string {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown timezone';
+  const full = now.toLocaleString(undefined, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+  const online =
+    typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean'
+      ? navigator.onLine
+      : null;
+
+  const lines = [
+    'Current environment — this is live and correct as of this moment. ' +
+      'Trust it over anything you believe from training data.',
+    `- Current date and time: ${full} (${tz}).`,
+    `- ISO timestamp: ${now.toISOString()}.`,
+  ];
+
+  if (online !== null) {
+    lines.push(
+      online
+        ? '- Network: this machine reports an active internet connection. Note this only means a network is reachable, not that any particular service is up.'
+        : '- Network: this machine reports NO internet connection. API calls will fail. Say so rather than retrying silently.',
+    );
+  }
+
+  lines.push(
+    'If asked the date or time, answer from the values above. Do not hedge about not having a clock — you do.',
+  );
+
+  return lines.join('\n');
+}
 
 // Tool awareness — injected when tool dispatch is enabled
 const TOOL_AWARENESS =
@@ -143,20 +193,24 @@ class AuraPersonalityServiceImpl {
     // 1. Base identity with name substitution
     parts.push(BASE_IDENTITY.replace('{AURA_NAME}', auraName));
 
-    // 2. Personality — custom prompt overrides preset
+    // 2. Live environment — date, time, connectivity. Rebuilt every call so a long
+    // session never answers with a stale clock.
+    parts.push(buildEnvironmentContext());
+
+    // 3. Personality — custom prompt overrides preset
     const customPrompt = cfg.customPrompt.trim().slice(0, MAX_CUSTOM_PROMPT_CHARS);
     const personalityDesc = customPrompt
       ? customPrompt
       : PRESET_DESCRIPTIONS[cfg.preset];
     parts.push(personalityDesc);
 
-    // 3. User name if set
+    // 4. User name if set
     const userName = cfg.userName.trim().slice(0, MAX_USER_NAME_CHARS);
     if (userName) {
       parts.push(`The user's name is ${JSON.stringify(userName)}. Address them by name occasionally but naturally.`);
     }
 
-    // 4. Injected memories
+    // 5. Injected memories
     if (!opts.skipMemory) {
       const memCtx = auraMemoryService.buildContextString({
         includePersonal: cfg.injectPersonal,
@@ -166,12 +220,12 @@ class AuraPersonalityServiceImpl {
       if (memCtx) parts.push(memCtx);
     }
 
-    // 5. Tool awareness — tell model what tools it can use
+    // 6. Tool awareness — tell model what tools it can use
     if (opts.includeToolAwareness !== false) {
       parts.push(TOOL_AWARENESS);
     }
 
-    // 6. Response style suffix
+    // 7. Response style suffix
     if (opts.responseStyle && STYLE_SUFFIX[opts.responseStyle]) {
       parts.push(STYLE_SUFFIX[opts.responseStyle]);
     }
