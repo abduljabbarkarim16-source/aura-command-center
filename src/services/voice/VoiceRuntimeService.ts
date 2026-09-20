@@ -23,6 +23,7 @@
 
 import { notificationService } from '../notifications/NotificationService';
 import { settingsService } from '../settings/SettingsService';
+import { eventLog } from '../logging/EventLogService';
 import type {
   VoiceRuntimeState,
   VoiceRuntimeEvent,
@@ -58,6 +59,8 @@ class VoiceRuntimeService {
   // ── Internal state ────────────────────────────────────────────────────────
 
   private _state: VoiceRuntimeState  = 'ready';
+  /** Monotonic mark of when `_state` was last entered, for dwell-time logging. */
+  private _stateEnteredMono = performance.now();
   private _activeSpeaker: VoiceSpeaker = 'none';
   private _mission: VoiceMission     = { ...DEFAULT_MISSION };
   private _pendingApprovals: VoiceApprovalRequest[] = [];
@@ -197,7 +200,30 @@ class VoiceRuntimeService {
 
   // ── State transitions ─────────────────────────────────────────────────────
 
+  /**
+   * Record a state change with how long the previous state lasted.
+   *
+   * The dwell time is the point: DEFECT-V1 is a turn that sits in `listening` for 31
+   * seconds with no visible cause. A transition log that carries `heldMs` makes a stuck
+   * state self-evident in the log instead of something to be timed off a video.
+   */
+  private logTransition(next: VoiceRuntimeState, via: string): void {
+    const now = performance.now();
+    const heldMs = Math.round(now - this._stateEnteredMono);
+    const prev = this._state;
+    this._stateEnteredMono = now;
+    if (prev === next) return;
+    eventLog.log(heldMs > 20_000 ? 'warn' : 'info', 'state', 'voice.transition', {
+      from: prev,
+      to: next,
+      heldMs,
+      via,
+      muted: this._isMuted,
+    });
+  }
+
   setState(state: VoiceRuntimeState): void {
+    this.logTransition(state, 'setState');
     this._state = state;
     this.broadcast();
   }
@@ -210,13 +236,18 @@ class VoiceRuntimeService {
   // ── Listening (admin voice) ───────────────────────────────────────────────
 
   startListening(): void {
-    if (this._isMuted) return;
+    if (this._isMuted) {
+      eventLog.info('state', 'listen.suppressed', { reason: 'muted' });
+      return;
+    }
+    this.logTransition('listening', 'startListening');
     this._state         = 'listening';
     this._activeSpeaker = 'admin';
     this.emit('admin_started_speaking');
   }
 
   stopListening(): void {
+    this.logTransition('ready', 'stopListening');
     this._state         = 'ready';
     this._activeSpeaker = 'none';
     this.emit('admin_stopped_speaking');

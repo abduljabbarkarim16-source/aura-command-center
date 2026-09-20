@@ -12,6 +12,7 @@
  */
 
 import type { AuraNotification, NotificationType, RiskLevel, NotificationAction } from '../../types/notifications';
+import { eventLog } from '../logging/EventLogService';
 
 export type ExtendedNotificationType =
   | NotificationType
@@ -177,6 +178,11 @@ export function notify(payload: AddPayload) {
 }
 
 export function notifyVoiceError(message: string) {
+  // Every voice failure path funnels through here on its way to the operator, which
+  // makes this the one place that reliably marks a turn as ended badly. Logging at the
+  // call sites instead would mean instrumenting a dozen early returns and missing some.
+  eventLog.error('error', 'voice.surfaced', undefined, { message });
+  eventLog.endTurn('error', { message });
   return notificationService.add({
     type: 'voice_event',
     title: 'Voice error',
