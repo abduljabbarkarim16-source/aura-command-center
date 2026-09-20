@@ -81,6 +81,14 @@ export interface VoiceTranscriptionResult {
   text?: string;
   latencyMs?: number;
   error?: string;
+  /**
+   * Set when transcription was deliberately skipped rather than attempted.
+   *
+   * `no-speech-energy` means the capture contained no speech, so it was never sent to
+   * the model. This is a success with empty text, not a failure: sending silence to a
+   * prompt-conditioned model makes it echo the prompt back as fabricated speech.
+   */
+  skippedReason?: 'no-speech-energy';
 }
 
 export interface VoiceChatResult {

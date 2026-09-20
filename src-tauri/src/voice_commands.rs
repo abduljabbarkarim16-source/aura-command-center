@@ -108,6 +108,53 @@ const HALLUCINATION_SUBSTRINGS: &[&str] = &[
     "(applause)",
 ];
 
+/// Split text into lowercase alphanumeric word tokens, discarding punctuation.
+fn word_tokens(s: &str) -> Vec<String> {
+    s.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_string())
+        .collect()
+}
+
+/// Longest transcript, in words, that we are willing to dismiss as a prompt echo.
+///
+/// Real answers longer than this are left alone even if they reuse domain vocabulary,
+/// so a genuine sentence about AURA or Codex is never discarded.
+const MAX_ECHO_WORDS: usize = 8;
+
+/// True when `text` looks like Whisper regurgitating the vocabulary hint rather than
+/// transcribing speech.
+///
+/// Two signals, both requiring the transcript to be short:
+///   1. every word in the transcript also appears in the prompt, or
+///   2. the transcript appears verbatim inside the prompt.
+///
+/// Short + wholly drawn from the prompt is the signature of an echo. A real utterance
+/// almost always contains at least one function word ("my", "what", "can") that the
+/// vocabulary hint does not, so `my name is Karim` survives while a bare `Karim` does not.
+fn is_prompt_echo(text: &str, prompt: &str) -> bool {
+    let words = word_tokens(text);
+    if words.is_empty() || words.len() > MAX_ECHO_WORDS {
+        return false;
+    }
+    let prompt_words: std::collections::HashSet<String> = word_tokens(prompt).into_iter().collect();
+    if prompt_words.is_empty() {
+        return false;
+    }
+
+    // 1. Every transcript word came from the prompt.
+    if words.iter().all(|w| prompt_words.contains(w)) {
+        return true;
+    }
+
+    // 2. The transcript is a contiguous run of the prompt (catches punctuation-only
+    //    differences such as "AURA operator console." vs "AURA operator console").
+    let norm_text = words.join(" ");
+    let norm_prompt = word_tokens(prompt).join(" ");
+    norm_prompt.contains(&norm_text)
+}
+
 /// Returns true if the transcript is almost certainly a hallucination.
 ///
 /// Checks (in order):
@@ -115,9 +162,28 @@ const HALLUCINATION_SUBSTRINGS: &[&str] = &[
 ///   2. Repetitive phrase loop — same short phrase repeated 3+ times
 ///      (catches "or a operator or a operator..." regardless of exact phrase)
 ///   3. Pure non-alphabetic output (emoji/symbol noise)
-fn is_likely_hallucination(text: &str) -> bool {
+fn is_likely_hallucination(text: &str, prompt: Option<&str>) -> bool {
     let lower = text.to_lowercase();
     let trimmed = lower.trim();
+
+    // 0. Prompt echo.
+    //
+    // Whisper conditions its decoder on `prompt`. Given audio with no speech in it —
+    // silence, a mouse click, background music — it has nothing to transcribe and
+    // emits the most probable continuation of that conditioning, which is the prompt's
+    // own content. Because AURA's vocabulary hint ends with "The operator's name is
+    // <name>", the single most common fabrication is the operator's name, returned as
+    // though they had spoken it.
+    //
+    // This defence matters more than it used to: the per-segment `no_speech_prob`
+    // check below is inert for gpt-4o-transcribe, which only supports
+    // `response_format: "json"`. Upgrading the STT model silently removed the strongest
+    // filter, and nothing replaced it.
+    if let Some(p) = prompt {
+        if is_prompt_echo(trimmed, p) {
+            return true;
+        }
+    }
 
     // 1. Known patterns
     for pattern in HALLUCINATION_SUBSTRINGS {
@@ -297,7 +363,9 @@ pub async fn openai_transcribe_audio(
 
     // Optional vocabulary/spelling hint. Capped well under Whisper's ~224-token
     // prompt budget so it biases spelling without crowding out the audio.
-    if let Some(p) = prompt {
+    // Borrow rather than move: the same prompt is needed later to detect whether the
+    // model simply echoed it back instead of transcribing speech.
+    if let Some(p) = prompt.as_deref() {
         let p = p.trim();
         if !p.is_empty() {
             form = form.text("prompt", truncate_utf8(p, 600).to_string());
@@ -340,7 +408,7 @@ pub async fn openai_transcribe_audio(
     //      In that case use AVERAGE probability, not MAX, to avoid single-pause rejection.
 
     // Step 1: hallucination filter applies regardless of text emptiness
-    if is_likely_hallucination(&text) {
+    if is_likely_hallucination(&text, prompt.as_deref()) {
         return Ok(String::new());
     }
 
@@ -908,7 +976,76 @@ pub fn local_transcribe_audio(
 
 #[cfg(test)]
 mod tests {
-    use super::audio_ext_for_mime;
+    use super::{audio_ext_for_mime, is_likely_hallucination, is_prompt_echo};
+
+    /// The exact prompt AURA sends, for an operator named Karim.
+    const PROMPT: &str = "AURA operator console. Domain terms: AURA, Claude, Codex, \
+        Antigravity, Tauri, Make.com, OpenAI, Whisper, Gemini, VAD, RuntimeTask, \
+        WebView2, ai-build-memory, agent-command-center. The operator's name is Karim.";
+
+    /// The reported fault: mouse clicks, music and silence were transcribed as the
+    /// operator's name. Whisper was echoing the tail of its own vocabulary hint.
+    #[test]
+    fn bare_operator_name_is_rejected_as_prompt_echo() {
+        assert!(is_prompt_echo("karim", PROMPT));
+        assert!(is_prompt_echo("Karim.", PROMPT));
+        assert!(is_prompt_echo("Karim, Karim", PROMPT));
+        assert!(is_likely_hallucination("Karim", Some(PROMPT)));
+    }
+
+    #[test]
+    fn other_prompt_fragments_are_rejected() {
+        assert!(is_prompt_echo("AURA operator console", PROMPT));
+        assert!(is_prompt_echo("Codex, Claude", PROMPT));
+        assert!(is_prompt_echo("Whisper", PROMPT));
+        assert!(is_prompt_echo("the operator's name is Karim", PROMPT));
+    }
+
+    /// The filter must never eat real speech. Each of these contains at least one word
+    /// the vocabulary hint does not, which is what distinguishes them from an echo.
+    #[test]
+    fn genuine_speech_survives() {
+        for phrase in [
+            "my name is Karim",
+            "what is my name",
+            "open settings for me",
+            "can you run git status",
+            "tell me about yourself",
+            "what can AURA do for me",
+            "hello",
+        ] {
+            assert!(!is_prompt_echo(phrase, PROMPT), "wrongly flagged as echo: {phrase}");
+            assert!(
+                !is_likely_hallucination(phrase, Some(PROMPT)),
+                "wrongly filtered: {phrase}"
+            );
+        }
+    }
+
+    /// Long utterances are never dismissed as echoes, even when dense with domain terms.
+    #[test]
+    fn long_domain_heavy_speech_is_not_an_echo() {
+        let s = "AURA Claude Codex Tauri Whisper Gemini VAD RuntimeTask WebView2";
+        assert!(super::word_tokens(s).len() > super::MAX_ECHO_WORDS);
+        assert!(!is_prompt_echo(s, PROMPT));
+    }
+
+    #[test]
+    fn echo_check_is_inert_without_a_prompt() {
+        assert!(!is_prompt_echo("karim", ""));
+        assert!(!is_likely_hallucination("Karim", None));
+    }
+
+    /// Pre-existing protections must keep working alongside the new check.
+    #[test]
+    fn existing_hallucination_patterns_still_caught() {
+        assert!(is_likely_hallucination("Thank you for watching!", Some(PROMPT)));
+        assert!(is_likely_hallucination("[music]", Some(PROMPT)));
+        assert!(is_likely_hallucination(
+            "or a operator or a operator or a operator",
+            Some(PROMPT)
+        ));
+    }
 
     /// DEFECT-3 regression: `audio/mpeg` must map to `mp3`, not fall through to
     /// the `webm` default. Uploading MP3 bytes as `audio.webm` makes the OpenAI

@@ -48,6 +48,46 @@ const MAX_HISTORY_TURNS = 5;
 const TRANSCRIPTION_VOCAB =
   'AURA, Claude, Codex, Antigravity, Tauri, Make.com, OpenAI, Whisper, Gemini, VAD, RuntimeTask, WebView2, ai-build-memory, agent-command-center';
 
+/**
+ * Peak amplitude (0..1) below which a capture is treated as containing no speech.
+ *
+ * Room tone and a quiet mic floor sit well under this; ordinary speech peaks far above
+ * it. Deliberately permissive — the cost of letting marginal audio through is one API
+ * call, whereas rejecting real speech loses the user's words.
+ */
+const SPEECH_PEAK_THRESHOLD = 0.035;
+
+/**
+ * Decode recorded audio and return its peak amplitude (0..1), or null if it cannot be
+ * decoded. Returning null deliberately fails open: an undecodable buffer is still sent
+ * for transcription rather than silently dropped.
+ */
+async function measurePeakLevel(buffer: ArrayBuffer): Promise<number | null> {
+  try {
+    const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctor) return null;
+    const ctx = new Ctor();
+    try {
+      const decoded = await ctx.decodeAudioData(buffer);
+      let peak = 0;
+      for (let ch = 0; ch < decoded.numberOfChannels; ch++) {
+        const data = decoded.getChannelData(ch);
+        // Stride the samples: a peak survives sub-sampling and this keeps the check
+        // cheap on long captures.
+        for (let i = 0; i < data.length; i += 16) {
+          const v = Math.abs(data[i]);
+          if (v > peak) peak = v;
+        }
+      }
+      return peak;
+    } finally {
+      try { await ctx.close(); } catch { /* ignore */ }
+    }
+  } catch {
+    return null;
+  }
+}
+
 function buildTranscriptionPrompt(savedName?: string): string {
   const base = `AURA operator console. Domain terms: ${TRANSCRIPTION_VOCAB}.`;
   // Append the stored name so Whisper biases toward it — dynamic, not hardcoded.
@@ -88,6 +128,28 @@ class OpenAIVoiceSessionServiceImpl {
     const buffer = await audioBlob.arrayBuffer();
     const audioBytes = Array.from(new Uint8Array(buffer));
     const contentType = audioBlob.type || 'audio/webm';
+
+    // ── Speech-energy gate ───────────────────────────────────────────────────
+    //
+    // Do not send audio that contains no speech. Whisper conditions on `prompt`, so
+    // given silence, a mouse click or background music it emits the most probable
+    // continuation of that conditioning — the vocabulary hint itself. Because the hint
+    // ends with the operator's name, the characteristic symptom is AURA "hearing" the
+    // user's name when nothing was said.
+    //
+    // Byte length alone cannot catch this: a webm/opus container holding several
+    // seconds of silence comfortably exceeds the backend's MIN_AUDIO_BYTES floor. The
+    // Rust side also has a prompt-echo filter, but refusing to make the call at all is
+    // better — it removes the failure mode at source and costs nothing.
+    const level = await measurePeakLevel(buffer.slice(0));
+    if (level !== null && level < SPEECH_PEAK_THRESHOLD) {
+      return {
+        success: true,
+        text: '',
+        latencyMs: Date.now() - start,
+        skippedReason: 'no-speech-energy',
+      };
+    }
 
     // ── Try local Whisper first (free, private, often more accurate) ──────────
     if ('__TAURI_INTERNALS__' in window) {
