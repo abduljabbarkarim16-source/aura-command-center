@@ -21,8 +21,13 @@
  */
 
 import { eventLog } from '../logging/EventLogService';
+import { persistentStore } from '../storage/PersistentStoreService';
 
+/** Fast synchronous copy. Read on every capture; wiped by a WebView2 reinstall. */
 const STORAGE_KEY = 'aura.voice.inputDeviceId';
+
+/** Durable copy in %APPDATA%, outside the WebView2 partition. Survives reinstalls. */
+const DURABLE_KEY = 'voice.inputDeviceId';
 
 /** Sentinel meaning "let the system decide" — the pre-ERR-0074 behaviour. */
 export const SYSTEM_DEFAULT_DEVICE = 'default';
@@ -45,7 +50,13 @@ class MicDeviceServiceImpl {
   private lastResolvedLabel: string | null = null;
   private lastFellBackToDefault = false;
 
-  /** The device id the user selected, or SYSTEM_DEFAULT_DEVICE when unset. */
+  /**
+   * The device id the user selected, or SYSTEM_DEFAULT_DEVICE when unset.
+   *
+   * Reads localStorage because callers need this synchronously while building
+   * getUserMedia constraints. The durable copy is hydrated into localStorage at startup
+   * by `hydrateFromDurableStore`.
+   */
   getSelectedDeviceId(): string {
     try {
       return localStorage.getItem(STORAGE_KEY) || SYSTEM_DEFAULT_DEVICE;
@@ -54,15 +65,61 @@ class MicDeviceServiceImpl {
     }
   }
 
+  /**
+   * Persist the choice to both stores.
+   *
+   * localStorage alone is not durable enough for this setting. An NSIS reinstall can
+   * wipe the WebView2 data partition, which is where localStorage lives (ERR-0017), and
+   * losing the microphone choice silently restores the exact fault ERR-0074 describes:
+   * AURA binds to the OS default, which on this machine is a device that returns
+   * digital silence. The user would see voice break again after an update, with no
+   * indication why.
+   */
   setSelectedDeviceId(deviceId: string): void {
+    const isDefault = !deviceId || deviceId === SYSTEM_DEFAULT_DEVICE;
     try {
-      if (!deviceId || deviceId === SYSTEM_DEFAULT_DEVICE) {
+      if (isDefault) {
         localStorage.removeItem(STORAGE_KEY);
       } else {
         localStorage.setItem(STORAGE_KEY, deviceId);
       }
     } catch {
-      /* storage unavailable — selection simply will not persist */
+      /* storage unavailable — the durable write below still applies */
+    }
+    // Fire-and-forget: the synchronous path above is what the next capture reads, so a
+    // slow or failed durable write must not block the UI.
+    void persistentStore
+      .set(DURABLE_KEY, isDefault ? '' : deviceId)
+      .catch(err => eventLog.warn('mic', 'device.durableWriteFailed', { error: String(err) }));
+    eventLog.info('mic', 'device.selected', {
+      deviceId: isDefault ? SYSTEM_DEFAULT_DEVICE : deviceId,
+    });
+  }
+
+  /**
+   * Restore the saved device from the reinstall-safe store into localStorage.
+   *
+   * Called once at startup. localStorage wins when both are present — it is the copy
+   * the user's most recent choice wrote synchronously. The durable store is only
+   * consulted when localStorage has nothing, which is exactly the post-reinstall case.
+   */
+  async hydrateFromDurableStore(): Promise<void> {
+    try {
+      let local: string | null = null;
+      try { local = localStorage.getItem(STORAGE_KEY); } catch { /* unavailable */ }
+      if (local) return;
+
+      const durable = await persistentStore.get(DURABLE_KEY);
+      if (!durable) return;
+
+      try { localStorage.setItem(STORAGE_KEY, durable); } catch { /* unavailable */ }
+      eventLog.info('mic', 'device.restored', {
+        deviceId: durable,
+        from: 'durable-store',
+        note: 'localStorage was empty — likely a reinstall',
+      });
+    } catch (err) {
+      eventLog.warn('mic', 'device.hydrateFailed', { error: String(err) });
     }
   }
 
