@@ -29,6 +29,19 @@ import type {
   OpenAIRealtimeSessionResponse,
 } from '../../types/voice-session';
 import type { MemoryExtractionResult } from '../../types/aura-memory';
+import { eventLog } from '../logging/EventLogService';
+
+/**
+ * Elapsed milliseconds from a `performance.now()` mark.
+ *
+ * Latency was previously measured with `Date.now()`, which follows the system clock and
+ * therefore jumps when Windows applies an NTP correction. That produced the reported
+ * negative latencies (-5666ms, -7140ms, -6841ms) — the clock moved backwards mid-turn.
+ * `performance.now()` is monotonic, so a duration derived from it cannot be negative.
+ */
+function since(mark: number): number {
+  return Math.max(0, Math.round(performance.now() - mark));
+}
 
 // ─── History message shape (matches Rust ChatMessage) ─────────────────────────
 
@@ -112,7 +125,7 @@ class OpenAIVoiceSessionServiceImpl {
   // ── STT: transcribe audio via Tauri backend ───────────────────────────────
 
   async transcribeAudio(audioBlob: Blob, promptOverride?: string): Promise<VoiceTranscriptionResult> {
-    const start = Date.now();
+    const start = performance.now();
 
     // Build vocabulary hint (domain terms + saved name).
     let prompt = promptOverride;
@@ -142,17 +155,30 @@ class OpenAIVoiceSessionServiceImpl {
     // Rust side also has a prompt-echo filter, but refusing to make the call at all is
     // better — it removes the failure mode at source and costs nothing.
     const level = await measurePeakLevel(buffer.slice(0));
+    eventLog.info('stt', 'capture.received', {
+      bytes: buffer.byteLength,
+      contentType,
+      peak: level === null ? null : Number(level.toFixed(4)),
+      threshold: SPEECH_PEAK_THRESHOLD,
+      promptChars: prompt?.length ?? 0,
+    });
+
     if (level !== null && level < SPEECH_PEAK_THRESHOLD) {
+      eventLog.info('stt', 'gate.skipped', {
+        reason: 'no-speech-energy',
+        peak: Number(level.toFixed(4)),
+      });
       return {
         success: true,
         text: '',
-        latencyMs: Date.now() - start,
+        latencyMs: since(start),
         skippedReason: 'no-speech-energy',
       };
     }
 
     // ── Try local Whisper first (free, private, often more accurate) ──────────
     if ('__TAURI_INTERNALS__' in window) {
+      const t0 = performance.now();
       try {
         const localText = await invoke<string>('local_transcribe_audio', {
           audioBytes,
@@ -160,24 +186,46 @@ class OpenAIVoiceSessionServiceImpl {
           prompt,
         });
         if (localText !== undefined && localText !== null) {
-          return { success: true, text: localText.trim(), latencyMs: Date.now() - start };
+          eventLog.info('stt', 'result', {
+            engine: 'local-whisper',
+            ms: since(t0),
+            chars: localText.trim().length,
+            text: localText.trim(),
+          });
+          return { success: true, text: localText.trim(), latencyMs: since(start) };
         }
-      } catch {
+      } catch (err) {
         // Local STT unavailable (faster-whisper not installed, script not found, etc.)
         // Fall through to API path — no error surfaced to the user.
+        eventLog.log('debug', 'stt', 'local.unavailable', {
+          ms: since(t0),
+          detail: String(err).slice(0, 200),
+        });
       }
     }
 
     // ── Fall back to OpenAI Whisper API ───────────────────────────────────────
+    const tApi = performance.now();
     try {
       const text = await invoke<string>('openai_transcribe_audio', {
         audioBytes,
         contentType,
         prompt,
       });
-      return { success: true, text: text.trim(), latencyMs: Date.now() - start };
+      eventLog.info('stt', 'result', {
+        engine: 'openai',
+        ms: since(tApi),
+        chars: text.trim().length,
+        text: text.trim(),
+        // An empty result here means a Rust-side filter rejected the transcript
+        // (prompt echo, hallucination pattern). Recorded so the two causes of an
+        // empty turn — no audio vs rejected text — stay distinguishable.
+        filteredToEmpty: text.trim().length === 0,
+      });
+      return { success: true, text: text.trim(), latencyMs: since(start) };
     } catch (err) {
-      return { success: false, error: String(err), latencyMs: Date.now() - start };
+      eventLog.error('stt', 'failed', err, { engine: 'openai', ms: since(tApi) });
+      return { success: false, error: String(err), latencyMs: since(start) };
     }
   }
 
@@ -189,7 +237,14 @@ class OpenAIVoiceSessionServiceImpl {
     systemPromptOverride?: string,
   ): Promise<VoiceChatResult> {
     if (!transcript.trim()) return { success: false, error: 'Empty transcript' };
-    const start = Date.now();
+    const start = performance.now();
+    eventLog.info('chat', 'request', {
+      mode: 'full',
+      responseStyle,
+      chars: transcript.trim().length,
+      historyTurns: Math.floor(this.history.length / 2),
+      text: transcript.trim(),
+    });
     try {
       // Send last N turns as history
       const historySlice = this.history.slice(-MAX_HISTORY_TURNS * 2);
@@ -208,9 +263,16 @@ class OpenAIVoiceSessionServiceImpl {
         this.history = this.history.slice(-MAX_HISTORY_TURNS * 2);
       }
 
-      return { success: true, text: text.trim(), latencyMs: Date.now() - start };
+      eventLog.info('chat', 'reply', {
+        mode: 'full',
+        ms: since(start),
+        chars: text.trim().length,
+        text: text.trim(),
+      });
+      return { success: true, text: text.trim(), latencyMs: since(start) };
     } catch (err) {
-      return { success: false, error: String(err), latencyMs: Date.now() - start };
+      eventLog.error('chat', 'failed', err, { mode: 'full', ms: since(start) });
+      return { success: false, error: String(err), latencyMs: since(start) };
     }
   }
 
@@ -228,14 +290,21 @@ class OpenAIVoiceSessionServiceImpl {
 
   async createFastChatResponse(transcript: string): Promise<VoiceChatResult> {
     if (!transcript.trim()) return { success: false, error: 'Empty transcript' };
-    const start = Date.now();
+    const start = performance.now();
     try {
       const text = await invoke<string>('openai_fast_chat_response', {
         transcript: transcript.trim(),
       });
-      return { success: true, text: text.trim(), latencyMs: Date.now() - start };
+      eventLog.info('chat', 'reply', {
+        mode: 'fast',
+        ms: since(start),
+        chars: text.trim().length,
+        text: text.trim(),
+      });
+      return { success: true, text: text.trim(), latencyMs: since(start) };
     } catch (err) {
-      return { success: false, error: String(err), latencyMs: Date.now() - start };
+      eventLog.error('chat', 'failed', err, { mode: 'fast', ms: since(start) });
+      return { success: false, error: String(err), latencyMs: since(start) };
     }
   }
 
@@ -312,7 +381,7 @@ class OpenAIVoiceSessionServiceImpl {
     voice: VoiceConversationSettings['ttsVoice'] = 'alloy',
   ): Promise<VoiceSpeechResult> {
     if (!text.trim()) return { success: false, error: 'Empty text' };
-    const start = Date.now();
+    const start = performance.now();
     try {
       const bytes = await invoke<number[]>('openai_synthesize_speech', {
         text: text.trim(),
@@ -326,9 +395,16 @@ class OpenAIVoiceSessionServiceImpl {
       const blob = new Blob([uint8], { type: 'audio/mpeg' });
       const audioBlobUrl = URL.createObjectURL(blob);
 
-      return { success: true, audioBlobUrl, audioBytes, latencyMs: Date.now() - start };
+      eventLog.info('tts', 'synthesized', {
+        ms: since(start),
+        voice,
+        chars: text.trim().length,
+        bytes: uint8.byteLength,
+      });
+      return { success: true, audioBlobUrl, audioBytes, latencyMs: since(start) };
     } catch (err) {
-      return { success: false, error: String(err), latencyMs: Date.now() - start };
+      eventLog.error('tts', 'failed', err, { ms: since(start), voice });
+      return { success: false, error: String(err), latencyMs: since(start) };
     }
   }
 

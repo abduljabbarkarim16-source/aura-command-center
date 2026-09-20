@@ -20,6 +20,8 @@
  * least once; before that the browser returns empty labels by design.
  */
 
+import { eventLog } from '../logging/EventLogService';
+
 const STORAGE_KEY = 'aura.voice.inputDeviceId';
 
 /** Sentinel meaning "let the system decide" — the pre-ERR-0074 behaviour. */
@@ -145,6 +147,11 @@ class MicDeviceServiceImpl {
       const stream = await navigator.mediaDevices.getUserMedia(this.getAudioConstraints());
       this.lastResolvedLabel = stream.getAudioTracks()[0]?.label || null;
       this.lastFellBackToDefault = false;
+      eventLog.info('mic', 'stream.opened', {
+        requested: saved,
+        resolvedLabel: this.lastResolvedLabel,
+        fellBack: false,
+      });
       return stream;
     } catch (err) {
       // `exact` throws when the saved device is gone. Fall back to the system default so
@@ -153,13 +160,22 @@ class MicDeviceServiceImpl {
       const isOverconstrained =
         err instanceof DOMException &&
         (err.name === 'OverconstrainedError' || err.name === 'NotFoundError');
-      if (!isOverconstrained || saved === SYSTEM_DEFAULT_DEVICE) throw err;
+      if (!isOverconstrained || saved === SYSTEM_DEFAULT_DEVICE) {
+        eventLog.error('mic', 'stream.failed', err, { requested: saved });
+        throw err;
+      }
 
       const stream = await navigator.mediaDevices.getUserMedia(
         this.getAudioConstraints(SYSTEM_DEFAULT_DEVICE),
       );
       this.lastResolvedLabel = stream.getAudioTracks()[0]?.label || null;
       this.lastFellBackToDefault = true;
+      eventLog.warn('mic', 'stream.opened', {
+        requested: saved,
+        resolvedLabel: this.lastResolvedLabel,
+        fellBack: true,
+        reason: err instanceof DOMException ? err.name : 'unknown',
+      });
       return stream;
     }
   }

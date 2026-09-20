@@ -1,6 +1,7 @@
 mod cli_commands;
 mod commands;
 mod config_commands;
+mod event_log;
 mod persist_commands;
 mod voice_commands;
 
@@ -243,6 +244,10 @@ pub fn run() {
             persist_commands::persist_write,
             persist_commands::persist_delete,
             persist_commands::persist_list,
+            event_log::append_event_log,
+            event_log::append_event_log_batch,
+            event_log::read_event_log,
+            event_log::event_log_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

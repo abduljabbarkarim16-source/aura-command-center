@@ -22,6 +22,7 @@ import type { RuntimeTaskType, RuntimeTask } from '../../types/runtime-task';
 import { ToolResultNormalizer } from './ToolResultNormalizer';
 import type { ToolResult } from '../../types/tool-result';
 import { incidentService } from '../testing/IncidentService';
+import { eventLog } from '../logging/EventLogService';
 import { visualShellStateService } from '../visual/VisualShellStateService';
 
 function uid(): string {
@@ -420,7 +421,14 @@ class ToolRegistryServiceImpl {
     const startIso = new Date().toISOString();
     const start = Date.now();
     const tool = this.getTool(toolId);
-    
+
+    eventLog.info('tool', 'dispatch', {
+      toolId,
+      inputKeys: Object.keys(inputs),
+      approved: options.approved ?? false,
+      taskId: options.taskId,
+    });
+
     if (!tool) {
       return ToolResultNormalizer.normalizeError(toolId, options.taskId, startIso, 0, new Error(`Unknown tool: ${toolId}`));
     }
@@ -495,6 +503,13 @@ class ToolRegistryServiceImpl {
       const durationMs = Date.now() - start;
       
       const ok = result.exitCode === 0;
+      eventLog.log(ok ? 'info' : 'warn', 'tool', 'result', {
+        toolId,
+        exitCode: result.exitCode,
+        durationMs,
+        outputChars: result.output.length,
+        output: result.output.slice(0, 500),
+      });
       const outcomeMessage = ok
         ? `Completed with exit code ${result.exitCode}. Output: ${result.output.slice(0, 100)}...`
         : `FAILED with exit code ${result.exitCode}. Output: ${result.output.slice(0, 100)}...`;
@@ -555,6 +570,7 @@ class ToolRegistryServiceImpl {
     } catch (err) {
       const errMsg = String(err);
       const durationMs = Date.now() - start;
+      eventLog.error('tool', 'crashed', err, { toolId, durationMs });
       runtimeTaskService.appendLog(runtimeTask.id, `Error: ${errMsg}`, 'error');
       
       this.updateExecution(execId, {
